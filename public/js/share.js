@@ -9,6 +9,11 @@ const WHAT = {
     people: 'Colaboradores',
     perms: 'Ven la carpeta y sus subcarpetas y pueden <b>añadir</b> videos, fotos y subcarpetas. Lo que añade una persona solo lo quitan ella o quien comparte la carpeta.',
   },
+  shelf: {
+    title: (n) => `Compartir la biblioteca «${n}»`,
+    people: 'Colaboradores',
+    perms: 'Ven la biblioteca entera (sus carpetas, videos y fotos) y pueden <b>añadir</b> cosas. Lo que añade una persona solo lo quitan ella o quien comparte la biblioteca.',
+  },
   routine: {
     title: (n) => `Editores de la rutina «${n}»`,
     people: 'Editores',
@@ -48,7 +53,7 @@ export function openShare(type, id) {
     const name = rec?.name || rec?.title || '';
     const c = state.collab || {};
     const sp = spaceFor(type, id);
-    const w = WHAT[type];
+    const w = type === 'folder' && libraryById(id)?.shelf ? WHAT.shelf : WHAT[type];
     const head = `<header><h2>${esc(w.title(name))}</h2><button class="x" data-sh="close" aria-label="Cerrar">✕</button></header>`;
     if (!c.ready) {
       dlg.innerHTML = `${head}

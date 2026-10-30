@@ -24,7 +24,7 @@ export const canDownload = (v) => Boolean(v.source.drive) || v.source.platform =
 export const spaceFor = (type, id) => (state.collab?.spaces || []).find((s) => s.type === type && s.rootId === id) || null;
 /** La carpeta compartida en la que está (o que es) esta carpeta. */
 export function sharedFolderOf(libraryId) {
-  for (let l = libraryById(libraryId), n = 0; l && !isTop(l) && n < 100; l = libraryById(l.parentId), n++) {
+  for (let l = libraryById(libraryId), n = 0; l && !l.root && n < 100; l = libraryById(l.parentId), n++) {
     const sp = spaceFor('folder', l.id);
     if (sp) return sp;
   }

@@ -83,11 +83,16 @@ export function renderLibrary(root, libraryId) {
   // Se puede soltar en una pestaña lo que arrastras para llevarlo a esa biblioteca.
   // Barra fina con las bibliotecas (una línea; si no caben, se desliza) y, debajo, el nombre grande
   // de la abierta, que se cambia pulsándolo. Se puede soltar en una pestaña lo que arrastras.
+  // Biblioteca compartida con otras personas (o que te compartieron).
+  const shelfShared = (l) => {
+    const sp = spaceFor('folder', l.id);
+    return Boolean(sp && (sp.members.length > 1 || !sp.mine));
+  };
   const shelfBar = () => `<nav class="shelf-bar" aria-label="Bibliotecas">${shelves().map((l) => `
-      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Haz clic para cambiar el nombre · mantén pulsado para moverla' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
+      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}${shelfShared(l) ? ' shared' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Haz clic para cambiar el nombre · mantén pulsado para moverla' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
       <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button>
     </nav>`;
-  const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
+  const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${shelf.root ? '' : `<button class="shelf-share" data-share-folder="${shelf.id}" title="Compartir esta biblioteca entera" aria-label="Compartir la biblioteca ${esc(shelfName(shelf))}">${SHARE_TAG}${shelfShared(shelf) ? `<span>${spaceFor('folder', shelf.id).members.length}</span>` : ''}</button>`}${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
   // Vistas como en el explorador de archivos (se recuerda la elegida). Ctrl + rueda cambia de una a otra.
   const VIEWS = [
     ['xl', 'Iconos muy grandes'], ['l', 'Iconos grandes'], ['m', 'Iconos medianos'],
@@ -140,6 +145,8 @@ export function renderLibrary(root, libraryId) {
   // Carpeta que se compartiría: en la que estás, o la única seleccionada.
   const shareTarget = () => {
     if (folder) return folder.id;
+    // En lo de arriba de una biblioteca (no la principal), sin nada elegido: la biblioteca entera.
+    if (!selection.length && !shelf.root) return shelf.id;
     return selection.length === 1 && selection[0].type === 'library' ? selection[0].id : null;
   };
 
