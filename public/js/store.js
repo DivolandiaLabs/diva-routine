@@ -72,8 +72,11 @@ export const linkedLibraries = () => state.libraries.filter((l) => l.igCollectio
 // Las demás bibliotecas (shelf) guardan dentro lo suyo: sus carpetas de arriba tienen parentId = su id.
 const mainLibrary = () => state.libraries.find((l) => l.root) || state.libraries[0];
 export const isTop = (l) => Boolean(l?.root || l?.shelf);
-/** Todas las bibliotecas, la principal primero y luego en el orden en que se crearon. */
-export const shelves = () => [mainLibrary(), ...state.libraries.filter((l) => l.shelf && !l.root).sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || String(a.createdAt).localeCompare(String(b.createdAt)))].filter(Boolean);
+/** Todas las bibliotecas, en el orden que les hayas dado (sin orden: la principal y luego por fecha). */
+export const shelves = () => [mainLibrary(), ...state.libraries.filter((l) => l.shelf && !l.root)].filter(Boolean)
+  .map((l, i) => [l, l.order ?? (l.root ? -1 : 1e6 + i)])
+  .sort((a, b) => a[1] - b[1])
+  .map(([l]) => l);
 export const shelfName = (l) => (l?.root && (!l.name || l.name === 'General') ? 'Biblioteca' : l?.name || 'Biblioteca');
 /** La biblioteca abierta (se recuerda en este ordenador). */
 export function activeShelf() {

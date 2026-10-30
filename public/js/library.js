@@ -16,6 +16,16 @@ import { openNet, NET_INFO } from './redes.js';
 import { openShare, SHARE_TAG } from './share.js';
 
 const URL_RE = /^https?:\/\//i;
+// Un link de la propia app (al arrastrar una pestaña o un recuadro) no es algo que importar.
+const ownLink = (u) => {
+  try {
+    const url = new URL(u);
+    return url.origin === location.origin || ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  } catch {
+    return true;
+  }
+};
+const importable = (u) => URL_RE.test(u) && !ownLink(u);
 
 const sq = (x, y, s) => `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="1.5"/>`;
 const VIEW_ICON = {
@@ -74,7 +84,7 @@ export function renderLibrary(root, libraryId) {
   // Barra fina con las bibliotecas (una línea; si no caben, se desliza) y, debajo, el nombre grande
   // de la abierta, que se cambia pulsándolo. Se puede soltar en una pestaña lo que arrastras.
   const shelfBar = () => `<nav class="shelf-bar" aria-label="Bibliotecas">${shelves().map((l) => `
-      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" title="${l.id === shelf.id ? 'Biblioteca abierta' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
+      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Biblioteca abierta' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
       <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button>
     </nav>`;
   const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
@@ -620,7 +630,7 @@ export function renderLibrary(root, libraryId) {
   async function importFiles(files, target = here()) {
     const lists = files.filter((f) => /\.txt$/i.test(f.name));
     const media = files.filter((f) => /^(video|image)\//.test(f.type) || /\.(mp4|m4v|mov|webm|mkv|png|jpe?g|webp|gif)$/i.test(f.name));
-    for (const f of lists) await importLinks((await f.text()).split(/\s+/).filter((u) => URL_RE.test(u)), target);
+    for (const f of lists) await importLinks((await f.text()).split(/\s+/).filter(importable), target);
     if (!media.length) return lists.length || toast('Solo se aceptan videos, fotos o un .txt con links', 'error');
     for (let i = 0; i < media.length; i++) {
       toast(`Subiendo ${i + 1} de ${media.length}: ${media[i].name}`);
@@ -638,7 +648,7 @@ export function renderLibrary(root, libraryId) {
     const box = $('#pasteThumbs');
     if (!box) return;
     box.innerHTML = pasted.map((p, i) => `<figure><img src="${p.url}" alt="Imagen pegada ${i + 1}"><button class="x" data-unpaste="${i}" title="Quitar">✕</button></figure>`).join('');
-    const urls = ($('#links')?.value || '').split(/\s+/).filter((u) => URL_RE.test(u)).length;
+    const urls = ($('#links')?.value || '').split(/\s+/).filter(importable).length;
     const parts = [urls && `${urls} link${urls === 1 ? '' : 's'}`, pasted.length && `${pasted.length} imagen${pasted.length === 1 ? '' : 'es'}`].filter(Boolean);
     $('[data-act="import"]').textContent = parts.length ? `Importar ${parts.join(' y ')}` : 'Importar';
   };
@@ -664,7 +674,7 @@ export function renderLibrary(root, libraryId) {
   });
 
   async function importAll() {
-    const urls = $('#links').value.split(/\s+/).filter((u) => URL_RE.test(u));
+    const urls = $('#links').value.split(/\s+/).filter(importable);
     const files = pasted.map((p) => p.file);
     if (!urls.length && !files.length) return toast('Pega links o una imagen en el cuadro', 'error');
     const target = importTarget();
@@ -682,6 +692,89 @@ export function renderLibrary(root, libraryId) {
 
   const MOVE_TYPE = 'application/x-jazz-mover';
   let moving = null; // { videos: [ids], folders: [ids] }
+
+  // Reordenar las bibliotecas: se mantiene pulsada una pestaña (medio segundo) y se arrastra.
+  // Con un clic normal solo se abre; así no se mueven sin querer.
+  let shelfDrag = null;
+  let holdTimer = null;
+  const releasePills = () => {
+    clearTimeout(holdTimer);
+    root.querySelectorAll('.shelf-pill.grab-ready').forEach((p) => {
+      p.classList.remove('grab-ready');
+      p.draggable = false;
+    });
+  };
+  root.addEventListener('pointerdown', (e) => {
+    const pill = e.target.closest?.('[data-shelf-pill]');
+    if (!pill || e.button !== 0) return;
+    holdTimer = setTimeout(() => {
+      pill.draggable = true;
+      pill.classList.add('grab-ready');
+      pill.dataset.held = '1';
+    }, 450);
+  });
+  root.addEventListener('pointerup', () => !shelfDrag && releasePills());
+  root.addEventListener('pointerleave', () => !shelfDrag && releasePills());
+  // Tras mantenerla pulsada, soltar sin arrastrar no la abre.
+  root.addEventListener('click', (e) => {
+    const pill = e.target.closest?.('[data-shelf-pill]');
+    if (pill?.dataset.held) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      delete pill.dataset.held;
+    }
+  }, true);
+  root.addEventListener('dragstart', (e) => {
+    const pill = e.target.closest?.('[data-shelf-pill]');
+    if (!pill) return;
+    if (!pill.classList.contains('grab-ready')) return e.preventDefault();
+    shelfDrag = pill.dataset.shelfPill;
+    e.dataTransfer.clearData(); // sin su link: así no se toma por algo que importar
+    e.dataTransfer.setData('application/x-diva-shelf', shelfDrag);
+    e.dataTransfer.effectAllowed = 'move';
+    pill.classList.add('dragging');
+    e.stopImmediatePropagation();
+  });
+  const pillSide = (e) => {
+    const pill = e.target.closest?.('[data-shelf-pill]');
+    if (!shelfDrag || !pill || pill.dataset.shelfPill === shelfDrag) return null;
+    const r = pill.getBoundingClientRect();
+    return { pill, after: e.clientX > r.left + r.width / 2 };
+  };
+  root.addEventListener('dragover', (e) => {
+    if (!shelfDrag) return;
+    e.stopImmediatePropagation();
+    root.querySelectorAll('.pill-before, .pill-after').forEach((x) => x.classList.remove('pill-before', 'pill-after'));
+    const at = pillSide(e);
+    if (!at) return;
+    e.preventDefault();
+    at.pill.classList.add(at.after ? 'pill-after' : 'pill-before');
+  }, true);
+  root.addEventListener('drop', async (e) => {
+    if (!shelfDrag) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    const at = pillSide(e);
+    const dragged = shelfDrag;
+    shelfDrag = null;
+    root.querySelectorAll('.pill-before, .pill-after, .shelf-pill.dragging').forEach((x) => x.classList.remove('pill-before', 'pill-after', 'dragging'));
+    if (!at) return;
+    const ids = shelves().map((l) => l.id).filter((x) => x !== dragged);
+    ids.splice(ids.indexOf(at.pill.dataset.shelfPill) + (at.after ? 1 : 0), 0, dragged);
+    try {
+      const r = await api.orderLibraries(ids);
+      r.libraries.forEach((l) => upsert('libraries', l));
+      const bar = root.querySelector('.shelf-bar');
+      if (bar) bar.outerHTML = shelfBar();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }, true);
+  root.addEventListener('dragend', () => {
+    shelfDrag = null;
+    releasePills();
+    root.querySelectorAll('.pill-before, .pill-after, .shelf-pill.dragging').forEach((x) => x.classList.remove('pill-before', 'pill-after', 'dragging'));
+  });
 
   root.addEventListener('dragstart', (e) => {
     const tile = e.target.closest?.('.tile[data-kind="video"], .tile[data-kind="library"]');
@@ -834,6 +927,7 @@ export function renderLibrary(root, libraryId) {
   const main = $('#main');
   let dragDepth = 0;
   main.addEventListener('dragenter', (e) => {
+    if (moving || shelfDrag) return; // se está arrastrando algo de la propia app
     if (![...e.dataTransfer.types].some((t) => t === 'Files' || t === 'text/uri-list')) return;
     dragDepth++;
     main.classList.add('dropping');
@@ -848,7 +942,7 @@ export function renderLibrary(root, libraryId) {
     const files = [...e.dataTransfer.files];
     if (files.length) return importFiles(files);
     const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
-    if (text) importLinks(text.split(/\s+/).filter((u) => URL_RE.test(u)), here());
+    if (text) importLinks(text.split(/\s+/).filter(importable), here());
   });
   $('#files').addEventListener('change', (e) => {
     importFiles([...e.target.files], panel === 'import' ? importTarget() : here());

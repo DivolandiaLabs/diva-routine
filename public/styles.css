@@ -735,3 +735,9 @@ dialog.ask footer { display: flex; justify-content: flex-end; gap: 10px; }
 .pin-menu label { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
 .pin-menu label:hover { background: var(--accent-soft); }
 .pin-menu input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; }
+/* reordenar bibliotecas */
+.shelf-pill { position: relative; }
+.shelf-pill.grab-ready { cursor: grabbing; transform: scale(1.06); box-shadow: 0 4px 14px rgb(0 0 0 / 0.35); transition: transform 0.12s; }
+.shelf-pill.dragging { opacity: 0.45; }
+.shelf-pill.pill-before { box-shadow: inset 3px 0 0 var(--accent); }
+.shelf-pill.pill-after { box-shadow: inset -3px 0 0 var(--accent); }

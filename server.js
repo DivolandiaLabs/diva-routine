@@ -1415,6 +1415,11 @@ async function handleApi(req, res, parts) {
           errors.push(`${raw}: no es un link`);
           continue;
         }
+        // Un link de la propia app (p. ej. al arrastrar una pestaña) no es un video.
+        if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\//i.test(raw)) {
+          errors.push(`${raw}: es un link de la propia app`);
+          continue;
+        }
         if (isIgCollection(raw)) {
           if (!ig.hasSession()) {
             errors.push(`${raw}: es una colección privada; para importarla conecta tu cuenta de Instagram (botón «Conectar Instagram» a la izquierda)`);
