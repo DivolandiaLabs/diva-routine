@@ -9,7 +9,7 @@ import {
   removeVideos, removeLibraries, rootLibrary, folders, topParent, isTop, shelves, shelfName, shelfOf, activeShelf, setActiveShelf, libraryLabel, needsExtraction, fmtTime,
   childFolders, folderPath, videosDeep, descendantIds, moveVideos, moveFolder,
   spaceFor, sharedFolderOf, addedByOther, who, sharedLabel,
-  ask,
+  ask, isPinnedIn,
 } from './store.js';
 import { openInstagram } from './instagram.js';
 import { openNet, NET_INFO } from './redes.js';
@@ -496,7 +496,7 @@ export function renderLibrary(root, libraryId) {
     setView(view);
     const { libs, vids } = visible();
     const searching = Boolean(filters.q.trim());
-    const pinned = !folder && !searching ? state.routines.filter((r) => r.pinned) : [];
+    const pinned = !folder && !searching ? state.routines.filter((r) => isPinnedIn(r, shelf.id)) : [];
     $('#count').textContent = `${libs.length ? `${libs.length} carpeta${libs.length === 1 ? '' : 's'} · ` : ''}${vids.length} elemento${vids.length === 1 ? '' : 's'}`;
     $('#grid').innerHTML = pinned.length || libs.length || vids.length
       ? pinned.map(routineTile).join('') + libs.map(folderTile).join('') + vids.map((v) => videoTile(v, searching)).join('')
@@ -997,8 +997,8 @@ export function renderLibrary(root, libraryId) {
     }
     const unpin = t.closest('[data-unpin]');
     if (unpin) {
-      await pinRoutines([unpin.dataset.unpin], false);
-      return toast('Rutina quitada de la página principal (sigue en Rutinas)');
+      await pinRoutines([unpin.dataset.unpin], false, shelf.id);
+      return toast(`Rutina quitada de «${shelfName(shelf)}» (sigue en Rutinas)`);
     }
     const delVideo = t.closest('[data-del-video]');
     if (delVideo) return deleteItems([], [videoById(delVideo.dataset.delVideo)].filter(Boolean));

@@ -671,9 +671,27 @@ export async function routineFrom(exerciseIds, { name, order = 'manual', routine
   return routine;
 }
 
-/** Pone o quita rutinas de la página principal (la Biblioteca). */
-export async function pinRoutines(ids, pinned) {
-  for (const id of ids) upsert('routines', await api.updateRoutine(id, { pinned }));
+// ---------- rutinas ancladas arriba en las bibliotecas ----------
+
+/** Bibliotecas donde se ve la rutina (las de antes, con pinned, en la principal). */
+export function pinnedShelves(r) {
+  const ids = r?.pinnedIn ?? (r?.pinned ? [mainLibrary()?.id] : []);
+  return ids.filter((id) => libraryById(id));
+}
+export const isPinnedIn = (r, shelfId) => pinnedShelves(r).includes(shelfId);
+/** Ancla la rutina justo en esas bibliotecas. */
+export async function setPinnedShelves(id, shelfIds) {
+  upsert('routines', await api.updateRoutine(id, { pinnedIn: shelfIds, pinned: shelfIds.length > 0 }));
+  emit('data');
+}
+/** Pone (en la biblioteca abierta) o quita (de todas, o de shelfId) unas rutinas. */
+export async function pinRoutines(ids, pinned, shelfId = null) {
+  for (const id of ids) {
+    const r = state.routines.find((x) => x.id === id);
+    const now = pinnedShelves(r);
+    const next = pinned ? [...new Set([...now, activeShelf().id])] : shelfId ? now.filter((x) => x !== shelfId) : [];
+    upsert('routines', await api.updateRoutine(id, { pinnedIn: next, pinned: next.length > 0 }));
+  }
   emit('data');
 }
 

@@ -4,7 +4,7 @@ import { phasesSVG } from './figure.js';
 import {
   esc, toast, fmtTime, debounce, upsert, refresh, emit, routineById, exerciseById, videoById, autoOrder, ui, removeRoutine, pinRoutines, CATEGORIES,
   spaceFor, sharedLabel,
-  ask,
+  ask, pinnedShelves, setPinnedShelves, shelves, shelfName, libraryById,
 } from './store.js';
 import { openShare, SHARE_TAG } from './share.js';
 
@@ -99,9 +99,9 @@ export function renderRoutine(root, id) {
   }
   draw();
   const drawPin = () => {
-    const on = Boolean(routineById(r.id)?.pinned);
-    $('#pinBtn').textContent = on ? 'Quitar de inicio' : 'Añadir a inicio';
-    $('#pinBtn').title = on ? 'Quitar de la página principal' : 'Que se vea en la página principal';
+    const n = pinnedShelves(routineById(r.id)).length;
+    $('#pinBtn').textContent = n ? `Anclada en ${n === 1 ? shelfName(libraryById(pinnedShelves(routineById(r.id))[0])) : `${n} bibliotecas`} ▾` : 'Anclar en biblioteca ▾';
+    $('#pinBtn').title = 'Elige en qué bibliotecas se ve arriba esta rutina';
   };
   drawPin();
   // Compartida: con quién (o quién te la compartió). Si te la compartieron, «Eliminar» es salir.
@@ -156,9 +156,28 @@ export function renderRoutine(root, id) {
       location.hash = '#/rutinas';
       return;
     } else if (act === 'pin') {
-      await pinRoutines([r.id], !routineById(r.id).pinned);
-      drawPin();
-      toast(routineById(r.id).pinned ? 'Rutina añadida a la página principal' : 'Rutina quitada de la página principal');
+      // Menú con una casilla por biblioteca: se ancla en las marcadas.
+      document.querySelector('.pin-menu')?.remove();
+      const menu = document.createElement('div');
+      menu.className = 'pin-menu drop-menu';
+      const on = new Set(pinnedShelves(routineById(r.id)));
+      menu.innerHTML = `<b>Que se vea arriba en…</b>${shelves().map((l) => `<label><input type="checkbox" value="${l.id}" ${on.has(l.id) ? 'checked' : ''}> ${esc(shelfName(l))}</label>`).join('')}`;
+      const btn = e.target.closest('[data-act]');
+      const b = btn.getBoundingClientRect();
+      menu.style.top = b.bottom + 6 + 'px';
+      menu.style.left = Math.max(8, Math.min(b.left, innerWidth - 240)) + 'px';
+      document.body.append(menu);
+      menu.addEventListener('change', async () => {
+        const ids = [...menu.querySelectorAll('input:checked')].map((i) => i.value);
+        await setPinnedShelves(r.id, ids);
+        drawPin();
+      });
+      const away = (ev) => {
+        if (menu.contains(ev.target) || btn.contains(ev.target)) return;
+        menu.remove();
+        document.removeEventListener('mousedown', away, true);
+      };
+      document.addEventListener('mousedown', away, true);
       return;
     } else if (act === 'share') {
       flushSave.flush();

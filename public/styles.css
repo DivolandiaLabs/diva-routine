@@ -729,3 +729,9 @@ dialog.ask p { margin: 0 0 18px; line-height: 1.5; font-size: 0.98rem; }
 dialog.ask footer { display: flex; justify-content: flex-end; gap: 10px; }
 .btn.danger-solid { background: #c62f24; border-color: #c62f24; color: #fff; }
 .btn.danger-solid:hover { background: #a8261d; border-color: #a8261d; }
+/* anclar una rutina en bibliotecas */
+.pin-menu { min-width: 230px; gap: 2px; }
+.pin-menu b { font-size: 0.82rem; color: var(--muted); padding: 4px 8px 6px; font-weight: 600; }
+.pin-menu label { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.pin-menu label:hover { background: var(--accent-soft); }
+.pin-menu input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; }

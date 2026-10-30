@@ -833,8 +833,8 @@ const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map(
 const VIDEO_EDITABLE = ['title', 'titleLocked', 'libraryId', 'notes', 'poster'];
 // titleLocked/categoryLocked: editados a mano, el análisis ya no los sustituye.
 const EXERCISE_EDITABLE = ['title', 'titleLocked', 'start', 'end', 'mode', 'keyframes', 'technique', 'category', 'categoryLocked', 'notes'];
-// pinned: la rutina se ve en la página principal.
-const ROUTINE_EDITABLE = ['name', 'items', 'notes', 'pinned'];
+// pinned / pinnedIn: la rutina se ve arriba en esas bibliotecas (pinned, de antes: en la principal).
+const ROUTINE_EDITABLE = ['name', 'items', 'notes', 'pinned', 'pinnedIn'];
 
 const rootLibrary = () => db.libraries.find((l) => l.root) || db.libraries[0];
 

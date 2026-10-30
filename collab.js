@@ -94,7 +94,10 @@ function strip(kind, r, sp) {
     delete o.lists;
     if (r.id === sp.rootId) delete o.parentId;
   }
-  if (kind === 'routines') delete o.pinned;
+  if (kind === 'routines') {
+    delete o.pinned;
+    delete o.pinnedIn;
+  }
   if (kind === 'videos' && o.source) delete o.source.fetchError;
   return o;
 }
@@ -108,6 +111,7 @@ function withLocal(kind, local, rec, sp) {
     if (rec.id === sp.rootId) r.parentId = local?.parentId ?? null;
   }
   if (kind === 'routines' && local?.pinned) r.pinned = true;
+  if (kind === 'routines' && local?.pinnedIn) r.pinnedIn = local.pinnedIn;
   // El fallo al descargar es de aquí; si ahora llega el enlace de Drive, se vuelve a intentar.
   const err = local?.source?.fetchError;
   if (kind === 'videos' && err && r.source && (!r.source.drive || r.source.drive === local.source.drive)) r.source = { ...r.source, fetchError: err };
