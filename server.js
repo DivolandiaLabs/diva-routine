@@ -578,7 +578,7 @@ async function serveFile(req, res, filePath) {
   const type = MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
   // La app siempre se vuelve a pedir (si no, el navegador puede usar una versión vieja);
   // los archivos subidos tienen nombre único y no cambian.
-  const cache = filePath.startsWith(UPLOAD_DIR + path.sep) ? 'private, max-age=31536000, immutable' : 'no-cache';
+  const cache = filePath.startsWith(UPLOAD_DIR + path.sep) ? 'private, max-age=31536000, immutable' : 'no-store';
   res.setHeader('Cache-Control', cache);
   const range = req.headers.range;
   if (range) {

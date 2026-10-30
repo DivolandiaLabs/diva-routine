@@ -184,7 +184,8 @@ function start() {
       }
     });
     win.on('closed', () => (win = null));
-    win.loadURL(origin + '/');
+    // La app siempre con su código de ahora: nada de lo guardado de una versión anterior.
+    win.webContents.session.clearCache().finally(() => win?.loadURL(origin + '/'));
 
     setTimeout(check, 8000);
     setInterval(check, EVERY);
