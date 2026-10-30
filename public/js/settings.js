@@ -103,25 +103,10 @@ export function renderSettings(root) {
     const typing = box.querySelector('#fbConfig');
     if (typing && (document.activeElement === typing || typing.value.trim())) return;
     let body;
-    if (!g.firebase || changingFb) {
-      body = `
-        <p><b>Una sola vez</b> (gratis, unos 10 minutos), en el mismo proyecto de Google que el identificador de arriba:</p>
-        <ol class="set-steps">
-          <li>Entra en <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">console.firebase.google.com</a> → <b>Crear un proyecto</b> y, en el nombre, <b>elige tu proyecto de Google Cloud «Diva Routine»</b> (así Firebase reconoce el identificador de la app). Google Analytics no hace falta.</li>
-          <li>En el menú: <b>Compilación → Authentication → Comenzar</b> → <b>Google</b> → <b>Habilitar</b> (pon tu correo de asistencia) → <b>Guardar</b>.</li>
-          <li><b>Compilación → Firestore Database → Crear base de datos</b>: ubicación cercana (p. ej. <code>eur3</code>) y <b>modo de producción</b>.</li>
-          <li>En Firestore, pestaña <b>Reglas</b>: borra lo que hay, pega estas reglas y pulsa <b>Publicar</b>. Son las que deciden quién ve y cambia cada cosa.
-            <div class="rules-box"><textarea id="fbRules" readonly rows="6" spellcheck="false">${esc(c.rules || '')}</textarea>
-            <button class="btn small" data-g="copy-rules">Copiar las reglas</button></div></li>
-          <li>Rueda ⚙ → <b>Configuración del proyecto</b> → <b>Tus apps</b> → icono <b>&lt;/&gt;</b> (Web): nombre «Diva Routine» → <b>Registrar app</b>. Copia el bloque <code>firebaseConfig</code> que aparece y pégalo aquí:</li>
-        </ol>
-        <textarea id="fbConfig" rows="5" spellcheck="false" placeholder="const firebaseConfig = {&#10;  apiKey: &quot;…&quot;,&#10;  projectId: &quot;…&quot;,&#10;  …&#10;};"></textarea>
-        <div class="row wrap">
-          <button class="btn primary" data-g="save-fb">Guardar</button>
-          ${changingFb ? '<button class="btn ghost" data-g="cancel-fb">Cancelar</button>' : ''}
-        </div>
-        <p class="hint">Esa configuración no es secreta (solo dice qué proyecto usa la app). Se guarda junto a la app (<code>firebase-config.json</code>), así que quien reciba una copia de la app ya la tiene.</p>`;
-    } else {
+    // Sin Firebase en la app (lo trae el instalador) no se muestra nada que configurar.
+    box.hidden = !g.firebase;
+    if (!g.firebase) return;
+    {
       const mine = c.spaces.filter((s) => s.mine).length;
       const theirs = c.spaces.length - mine;
       const p = c.progress;
@@ -131,34 +116,18 @@ export function renderSettings(root) {
         : c.last ? `Al día · ${timeOf(c.last)}` : 'Preparando…';
       body = `
         <dl class="set-list">
-          <dt>Firebase</dt><dd>proyecto <b>${esc(g.firebaseProject || '')}</b></dd>
           <dt>Estado</dt><dd>${c.state === 'syncing' ? '<span class="spin"></span> ' : ''}${line}</dd>
           ${g.connected ? `<dt>Compartido</dt><dd>${mine} cosa${mine === 1 ? '' : 's'} tuya${mine === 1 ? '' : 's'} · ${theirs} que te comparten</dd>` : ''}
         </dl>
         <div class="row wrap">
           ${g.connected ? `<button class="btn" data-g="collab-sync" ${c.state === 'syncing' ? 'disabled' : ''}>Sincronizar ahora</button>` : ''}
-          <button class="btn small ghost" data-g="change-fb">Cambiar la configuración</button>
         </div>
         <p class="hint">Para compartir: en la <b>Biblioteca</b>, entra en una carpeta y pulsa <b>Compartir</b> (podrán añadir cosas); en una rutina, <b>Editores</b>; en <b>Rutinas</b>, elige un dibujo y pulsa <b>Compartir</b>. Escribe el Gmail de cada persona.</p>
-        <details class="set-help">
-          <summary>Qué necesitan las personas con quienes compartes</summary>
-          <ol>
-            <li>${desk()
-              ? 'La app: pásales el instalador. Si lo creaste después de configurar Google y Firebase, ya lleva tu identificador y no tienen que configurar nada.'
-              : 'La app: cópiales la carpeta de la app (sin <code>data</code>; con <code>google-client.json</code> y <code>firebase-config.json</code>) e instala Node.js.'}</li>
-            <li>En <b>Ajustes</b>, <b>Iniciar sesión con Google</b> con su Gmail (el mismo que escribiste al invitarles). Lo compartido les aparece solo, en su Biblioteca y en Rutinas.</li>
-            <li>Si en Google Auth Platform la app no está <b>En producción</b>, añádelas en <b>Público → Usuarios de prueba</b>.</li>
-          </ol>
-          <p>Los videos y fotos de una carpeta compartida se suben al Google Drive de quien los añade (carpeta «Diva Routine · compartido»), con un enlace que solo conoce la app. Los dibujos y las rutinas van por Firebase.</p>
-        </details>
-        <details class="set-help"><summary>Ver las reglas de Firestore</summary>
-          <div class="rules-box"><textarea id="fbRules" readonly rows="8" spellcheck="false">${esc(c.rules || '')}</textarea>
-          <button class="btn small" data-g="copy-rules">Copiar las reglas</button></div>
-        </details>`;
+`;
     }
     const html = `
       <h3>Compartir con otras personas</h3>
-      <p>Comparte carpetas (los demás pueden añadir videos y fotos), rutinas (con varios editores) y dibujos. Cada persona lo ve en su app al entrar con su Gmail. Usa Firebase, de Google: gratis para este uso.</p>
+      <p>Comparte carpetas (los demás pueden añadir videos y fotos), rutinas (con varios editores) y dibujos. Cada persona lo ve en su app al entrar con su Gmail.</p>
       ${body}`;
     // Si no cambió nada, no se repinta (así no se cierra lo que tengas desplegado).
     if (html === lastCollabHtml) return;
