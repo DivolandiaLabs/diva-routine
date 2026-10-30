@@ -16,13 +16,6 @@ import { openShare, SHARE_TAG } from './share.js';
 
 const URL_RE = /^https?:\/\//i;
 
-// Marca de cada tipo en la esquina del recuadro: video, foto o rutina.
-const KIND = {
-  video: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>',
-  image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="m4 17 5-5 4 4 3-3 4 4"/></svg>',
-  routine: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor"/></svg>',
-};
-
 const sq = (x, y, s) => `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="1.5"/>`;
 const VIEW_ICON = {
   xl: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${sq(4, 4, 16)}</svg>`,
@@ -404,7 +397,7 @@ export function renderLibrary(root, libraryId) {
           ? `<span class="mosaic m${shown.length}">${shown.map((v) => `<span>${videoThumb(v)}</span>`).join('')}</span>`
           : `<span class="folder-empty">${ICON.folder}</span>`}</a>
         <a class="tile-body" href="#/biblioteca/${l.id}">
-          <h3>${ICON.folder}<span>${esc(l.name)}</span></h3>
+          <h3>${ICON.folder}<span class="name-edit" data-name="library:${l.id}" title="Haz clic para cambiar el nombre">${esc(l.name)}</span></h3>
           <div class="meta">${subs ? `<span>${subs} carpeta${subs === 1 ? '' : 's'}</span>` : ''}<span>${vids.length} elemento${vids.length === 1 ? '' : 's'}</span>${l.igCollections?.length ? '<i class="ig-tag" title="Sincronizada con Instagram">IG</i>' : ''}${sp && (sp.members.length > 1 || !sp.mine) ? `<i class="share-tag" title="Carpeta colaborativa · ${esc(sharedLabel(sp))}">${SHARE_TAG}${sp.members.length}</i>` : byTag(l)}</div>
         </a>
       </article>`;
@@ -412,12 +405,11 @@ export function renderLibrary(root, libraryId) {
 
   const videoTile = (v, showFolder) => `
     <article class="tile tile-${v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="true">
-      <span class="kind-mark" aria-hidden="true">${v.source.mediaType === 'image' ? KIND.image : KIND.video}</span>
       <label class="sel" title="Seleccionar para una rutina"><input type="checkbox" data-sel-video="${v.id}"><b class="order"></b></label>
       ${lockedIn(v, v.libraryId) ? '' : `<button class="card-del" data-del-video="${v.id}" title="Borrar" aria-label="Borrar ${esc(v.title)}">✕</button>`}
       <a class="tile-thumb" href="#/video/${v.id}">${videoThumb(v)}</a>
       <a class="tile-body" href="#/video/${v.id}">
-        <h3><span>${esc(v.title)}</span></h3>
+        <h3><span class="name-edit" data-name="video:${v.id}" title="Haz clic para cambiar el nombre">${esc(v.title)}</span></h3>
         <div class="meta"><span class="vstatus">${statusHtml(v)}</span><span>${esc(PLATFORM[v.source.platform] || '')}</span>${byTag(v)}${showFolder ? `<span>${esc(libraryLabel(libraryById(v.libraryId)))}</span>` : ''}</div>
       </a>
     </article>`;
@@ -429,12 +421,11 @@ export function renderLibrary(root, libraryId) {
     return `
       <article class="tile tile-routine" data-kind="routine" data-id="${r.id}">
         <button class="card-del" data-unpin="${r.id}" title="Quitar de la página principal (la rutina no se borra)" aria-label="Quitar ${esc(r.name)} de la página principal">✕</button>
-        <span class="kind-mark" aria-hidden="true">${KIND.routine}</span>
         <a class="tile-thumb" href="#/rutina/${r.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((e) => `<span>${exerciseFigure(e, 120)}</span>`).join('')}</span>`
           : '<span class="folder-empty">Vacía</span>'}</a>
         <a class="tile-body" href="#/rutina/${r.id}">
-          <h3>${ICON.routine}<span>${esc(r.name)}</span></h3>
+          <h3>${ICON.routine}<span class="name-edit" data-name="routine:${r.id}" title="Haz clic para cambiar el nombre">${esc(r.name)}</span></h3>
           <div class="meta"><span class="badge b-routine">Rutina</span><span>${exs.length} ejercicio${exs.length === 1 ? '' : 's'}</span></div>
         </a>
       </article>`;
@@ -860,6 +851,49 @@ export function renderLibrary(root, libraryId) {
   };
   document.addEventListener('keydown', onKey);
 
+  // El nombre se escribe ahí mismo, sobre el recuadro (Enter guarda, Esc cancela). La app de
+  // escritorio no tiene prompt().
+  const RENAME = {
+    library: { get: (id) => libraryById(id)?.name, save: async (id, name) => upsert('libraries', await api.renameLibrary(id, name)), max: 60 },
+    video: { get: (id) => videoById(id)?.title, save: async (id, name) => upsert('videos', await api.updateVideo(id, { title: name, titleLocked: true })), max: 120 },
+    routine: { get: (id) => state.routines.find((r) => r.id === id)?.name, save: async (id, name) => upsert('routines', await api.updateRoutine(id, { name })), max: 80 },
+  };
+  const renameInline = (tile, kind, id) => {
+    const how = RENAME[kind];
+    const current = how?.get(id);
+    if (!tile || current == null || tile.querySelector('.tile-rename')) return;
+    const input = document.createElement('input');
+    input.className = 'tile-rename';
+    input.value = current;
+    input.maxLength = how.max;
+    input.setAttribute('aria-label', 'Nuevo nombre');
+    tile.classList.add('renaming');
+    tile.append(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const name = input.value.trim();
+      input.remove();
+      tile.classList.remove('renaming');
+      if (!save || !name || name === current) return;
+      try {
+        await how.save(id, name);
+        emit('data');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') finish(true);
+      else if (ev.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', (ev) => ev.stopPropagation());
+  };
+
   root.addEventListener('click', async (e) => {
     const t = e.target;
     const un = t.closest('[data-unpaste]');
@@ -889,45 +923,13 @@ export function renderLibrary(root, libraryId) {
       return emit('data');
     }
 
+    // Cambiar el nombre: con el lápiz de una carpeta o pulsando el nombre de cualquier recuadro.
     const ren = t.closest('[data-rename-lib]');
-    if (ren) {
-      // El nombre se escribe ahí mismo, sobre el recuadro (la app de escritorio no tiene prompt()).
+    const nameEl = t.closest('[data-name]');
+    if (ren || nameEl) {
       e.preventDefault();
-      const lib = libraryById(ren.dataset.renameLib);
-      const tile = ren.closest('.tile');
-      if (!lib || tile.querySelector('.tile-rename')) return;
-      const input = document.createElement('input');
-      input.className = 'tile-rename';
-      input.value = lib.name;
-      input.maxLength = 60;
-      input.setAttribute('aria-label', 'Nuevo nombre de la carpeta');
-      tile.classList.add('renaming');
-      tile.append(input);
-      input.focus();
-      input.select();
-      let done = false;
-      const finish = async (save) => {
-        if (done) return;
-        done = true;
-        const name = input.value.trim();
-        input.remove();
-        tile.classList.remove('renaming');
-        if (!save || !name || name === lib.name) return;
-        try {
-          upsert('libraries', await api.renameLibrary(lib.id, name));
-          emit('data');
-          toast(`Carpeta renombrada a «${name}»`);
-        } catch (err) {
-          toast(err.message, 'error');
-        }
-      };
-      input.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter') finish(true);
-        else if (ev.key === 'Escape') finish(false);
-      });
-      input.addEventListener('blur', () => finish(true));
-      input.addEventListener('click', (ev) => ev.stopPropagation());
-      return;
+      const [kind, id] = ren ? ['library', ren.dataset.renameLib] : nameEl.dataset.name.split(':');
+      return renameInline(t.closest('.tile'), kind, id);
     }
     if (t.closest('[data-act="rename"]')) {
       const input = $('#libName');
