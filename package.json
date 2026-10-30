@@ -1,0 +1,88 @@
+{
+  "name": "diva-routine",
+  "productName": "Diva Routine",
+  "version": "1.0.9",
+  "description": "Rutinas de entrenamiento de jazz: biblioteca de videos/links, extracción de técnica y tablas visuales",
+  "author": "Divolandia",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.js",
+  "scripts": {
+    "start": "node server.js",
+    "app": "electron .",
+    "instalador": "node desktop/preparar.js && electron-builder --win --publish never",
+    "publicar": "node desktop/preparar.js && electron-builder --win --publish always"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "build": {
+    "appId": "com.divolandia.jazzrutinas",
+    "productName": "Diva Routine",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "server.js",
+      "google.js",
+      "collab.js",
+      "instagram.js",
+      "social.js",
+      "public/**/*",
+      "desktop/main.js",
+      "desktop/icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/config",
+        "to": "config",
+        "filter": [
+          "*.json"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Diva-Routine-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Diva Routine",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": [
+        "es_ES"
+      ],
+      "language": "3082"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "DivolandiaLabs",
+        "repo": "diva-routine",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
+}

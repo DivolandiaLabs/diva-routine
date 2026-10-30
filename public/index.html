@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diva Routine</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" type="image/png" href="/logo.png">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/biblioteca"><img class="brand-logo" src="/logo.png" alt=""> Diva Routine</a>
+    <nav>
+      <a href="#/biblioteca" data-nav="biblioteca">Biblioteca</a>
+      <a href="#/rutinas" data-nav="rutinas">Rutinas</a>
+      <a href="#/ajustes" data-nav="ajustes">Ajustes</a>
+    </nav>
+    <span id="jobs" class="jobs" hidden></span>
+    <a id="gsync" class="gsync" href="#/ajustes" hidden></a>
+    <a id="account" class="account" href="#/ajustes" hidden></a>
+  </header>
+  <main id="app" aria-live="polite"></main>
+  <div id="toast" role="status"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

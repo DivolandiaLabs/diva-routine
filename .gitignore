@@ -1,0 +1,7 @@
+data/
+config.json
+google-client.json
+firebase-config.json
+dist/
+build/config/
+node_modules/
