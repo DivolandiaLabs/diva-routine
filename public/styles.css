@@ -741,3 +741,8 @@ dialog.ask footer { display: flex; justify-content: flex-end; gap: 10px; }
 .shelf-pill.dragging { opacity: 0.45; }
 .shelf-pill.pill-before { box-shadow: inset 3px 0 0 var(--accent); }
 .shelf-pill.pill-after { box-shadow: inset -3px 0 0 var(--accent); }
+/* cambiar el nombre desde la pestaña */
+.shelf-pill.on { cursor: text; }
+.shelf-pill.renaming { overflow: visible; color: transparent; }
+.shelf-pill .tile-rename { position: absolute; left: 0; top: 50%; bottom: auto; right: auto; transform: translateY(-50%); min-width: 200px; padding: 6px 10px; font-size: 0.92rem; z-index: 5; }
+.shelf-bar:has(.renaming) { overflow: visible; }

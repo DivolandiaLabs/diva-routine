@@ -84,7 +84,7 @@ export function renderLibrary(root, libraryId) {
   // Barra fina con las bibliotecas (una línea; si no caben, se desliza) y, debajo, el nombre grande
   // de la abierta, que se cambia pulsándolo. Se puede soltar en una pestaña lo que arrastras.
   const shelfBar = () => `<nav class="shelf-bar" aria-label="Bibliotecas">${shelves().map((l) => `
-      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Biblioteca abierta' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
+      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Haz clic para cambiar el nombre · mantén pulsado para moverla' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
       <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button>
     </nav>`;
   const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
@@ -722,6 +722,13 @@ export function renderLibrary(root, libraryId) {
       e.preventDefault();
       e.stopImmediatePropagation();
       delete pill.dataset.held;
+      return;
+    }
+    // Pulsar la pestaña de la biblioteca abierta: se cambia su nombre ahí mismo.
+    if (pill?.classList.contains('on') && !e.target.closest('.tile-rename')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      renameInline(pill, 'library', pill.dataset.shelfPill);
     }
   }, true);
   root.addEventListener('dragstart', (e) => {
