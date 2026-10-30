@@ -47,7 +47,9 @@ export const api = {
   syncLibrary: (id) => request('POST', `/api/libraries/${id}/sync`),
   unlinkCollection: (id, collectionId) => request('DELETE', `/api/libraries/${id}/collections/${encodeURIComponent(collectionId)}`),
 
+  copyItems: (videos, folders, target) => request('POST', '/api/copy', { videos, folders, target }),
   socialStatus: () => request('GET', '/api/social'),
+  cloudImport: (url, libraryId) => request('POST', '/api/cloud/import', { url, libraryId }),
   socialConnect: (net, cookies) => request('POST', `/api/social/${net}`, { cookies }),
   socialDisconnect: (net) => request('DELETE', `/api/social/${net}`),
   youtubeLists: () => request('GET', '/api/social/youtube/lists'),

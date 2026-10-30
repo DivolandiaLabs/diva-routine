@@ -43,6 +43,14 @@ const ICON = {
   share: SHARE_TAG,
   social: svg('<circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="m8.3 10.8 7.4-3.6M8.3 13.2l7.4 3.6"/>'),
 };
+// Servicios en la nube: se importa pegando el link compartido de un archivo o una carpeta.
+const CLOUDS = {
+  gdrive: { name: 'Google Drive', color: '#1fa463', icon: svg('<path d="M8 3h8l6 10-4 7H6l-4-7z"/><path d="M8 3l6 10H2M16 3 10 13h12M6 20l4-7"/>') },
+  dropbox: { name: 'Dropbox', color: '#0061fe', icon: svg('<path d="m7 3-5 3.2L7 9.5l5-3.3zM17 3l-5 3.2 5 3.3 5-3.3zM2 12.8 7 16l5-3.2-5-3.3zM17 9.5l-5 3.3 5 3.2 5-3.2zM7 17.2l5 3.3 5-3.3-5-3.2z"/>') },
+  onedrive: { name: 'OneDrive', color: '#0f78d4', icon: svg('<path d="M7 18h11.5a3.5 3.5 0 0 0 .5-7 5.5 5.5 0 0 0-10.4-1.6A4.5 4.5 0 0 0 7 18z"/>') },
+  mega: { name: 'MEGA', color: '#d9272e', icon: svg('<circle cx="12" cy="12" r="9"/><path d="M8 15.5V9l4 4 4-4v6.5"/>') },
+};
+
 const NET_ICON = {
   youtube: svg('<rect x="2.5" y="5.5" width="19" height="13" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>'),
   tiktok: svg('<path d="M14 4v10.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M14 4c.5 2.5 2.3 4 5 4"/>'),
@@ -315,7 +323,13 @@ export function renderLibrary(root, libraryId) {
           <h4>${ig ? ICON.instagram : NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${body}</section>`;
       };
       return `${panelHead('Redes sociales')}
-        ${['instagram', 'youtube', 'tiktok', 'facebook'].map(card).join('')}`;
+        ${['instagram', 'youtube', 'tiktok', 'facebook'].map(card).join('')}
+        <h4 class="sh-sub">Nube</h4>
+        <p class="hint">Pega el link compartido de un archivo o de una carpeta: una carpeta entra como carpeta nueva, con sus videos y fotos.</p>
+        ${Object.entries(CLOUDS).map(([key, c]) => `<section class="net-card" style="--net:${c.color}">
+          <h4>${c.icon}${c.name}</h4>
+          <div class="row ig-add"><input id="cloudUrl-${key}" placeholder="Link compartido de ${c.name}" aria-label="Link de ${c.name}"><button class="btn small primary" data-cloud-import="${key}">Importar</button></div>
+        </section>`).join('')}`;
     },
 
     draw: () => {
@@ -692,6 +706,31 @@ export function renderLibrary(root, libraryId) {
     return !(vidsHere && libsHere);
   };
   const dropOf = (e) => e.target.closest?.('[data-drop-lib]');
+  // Menú junto al ratón al soltar: Mover aquí / Copiar aquí (Esc o clic fuera, nada).
+  const askCopyOrMove = (x, y) => new Promise((resolve) => {
+    const menu = document.createElement('div');
+    menu.className = 'drop-menu';
+    menu.innerHTML = '<button data-how="move">Mover aquí</button><button data-how="copy">Copiar aquí</button><button data-how="" class="ghost">Cancelar</button>';
+    document.body.append(menu);
+    const r = menu.getBoundingClientRect();
+    menu.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
+    menu.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+    menu.querySelector('button').focus();
+    const done = (how) => {
+      menu.remove();
+      document.removeEventListener('mousedown', outside, true);
+      document.removeEventListener('keydown', esc, true);
+      resolve(how || null);
+    };
+    const outside = (ev) => !menu.contains(ev.target) && done(null);
+    const esc = (ev) => ev.key === 'Escape' && done(null);
+    menu.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-how]');
+      if (b) done(b.dataset.how);
+    });
+    document.addEventListener('mousedown', outside, true);
+    document.addEventListener('keydown', esc, true);
+  });
   // Una carpeta arrastrada al borde de otra del mismo sitio se coloca antes o después de ella
   // (reordenar); en el centro, se mete dentro.
   let reorderAt = null;
@@ -759,14 +798,26 @@ export function renderLibrary(root, libraryId) {
     if (!canDropOn(target)) return endMove();
     const { videos, folders: libs } = moving;
     endMove();
+    // Al soltar se elige qué hacer: moverlo o dejar una copia ahí.
+    const how = await askCopyOrMove(e.clientX, e.clientY);
+    if (!how) return;
+    const where = target ? libraryLabel(libraryById(target)) : shelfName(rootLibrary());
+    const n = videos.length + libs.length;
     try {
+      if (how === 'copy') {
+        const r = await api.copyItems(videos, libs, target || rootLibrary().id);
+        r.libraries.forEach((l) => upsert('libraries', l));
+        r.videos.forEach((v) => upsert('videos', v));
+        emit('data');
+        queueDownload(r.videos.filter((v) => !v.source.file && canDownload(v)).map((v) => v.id));
+        return toast(`${n === 1 ? 'Copiado' : `${n} copiados`} en «${where}»`);
+      }
       if (videos.length) await moveVideos(videos, target || rootLibrary().id);
       for (const id of libs) await moveFolder(id, target);
       // Lo movido ya no está aquí: sale de la selección.
       for (let i = selection.length - 1; i >= 0; i--) if ([...videos, ...libs].includes(selection[i].id)) selection.splice(i, 1);
       emit('selection');
-      const n = videos.length + libs.length;
-      toast(`${n === 1 ? 'Movido' : `${n} movidos`} a «${target ? libraryLabel(libraryById(target)) : 'Biblioteca'}»`);
+      toast(`${n === 1 ? 'Movido' : `${n} movidos`} a «${where}»`);
     } catch (err) {
       toast(err.message, 'error');
       await refresh();
@@ -1028,6 +1079,26 @@ export function renderLibrary(root, libraryId) {
       delete savedCache[key];
       emit('data');
       return toast(`${name} desconectado`);
+    }
+    const cloudBtn = t.closest('[data-cloud-import]');
+    if (cloudBtn) {
+      const input = $(`#cloudUrl-${cloudBtn.dataset.cloudImport}`);
+      const url = input.value.trim();
+      if (!URL_RE.test(url)) return input.focus();
+      cloudBtn.disabled = true;
+      cloudBtn.textContent = 'Leyendo…';
+      try {
+        const r = await api.cloudImport(url, here());
+        upsert('libraries', r.library);
+        r.created.forEach((v) => upsert('videos', v));
+        input.value = '';
+        await finishImport(r.created, new Set(r.library.id !== here() ? [r.library.id] : []));
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      cloudBtn.disabled = false;
+      cloudBtn.textContent = 'Importar';
+      return;
     }
     const savedImport = t.closest('[data-saved-import]');
     if (savedImport) return importSaved(savedImport.dataset.savedImport, savedImport);

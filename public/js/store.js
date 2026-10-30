@@ -16,7 +16,7 @@ export async function refresh() {
  * Se puede bajar el archivo: de su link (yt-dlp, o Instagram con tu cuenta conectada) o, si es
  * de una carpeta compartida, del Drive de quien lo añadió.
  */
-export const canDownload = (v) => Boolean(v.source.drive) || (Boolean(v.source.url) && (state.ytdlp || (v.source.platform === 'instagram' && state.instagram.connected)));
+export const canDownload = (v) => Boolean(v.source.drive) || v.source.platform === 'cloud' || (Boolean(v.source.url) && (state.ytdlp || (v.source.platform === 'instagram' && state.instagram.connected)));
 
 // ---------- compartido con otras personas ----------
 
@@ -276,7 +276,7 @@ export function autoOrder(exercises) {
 
 // ---------- miniaturas ----------
 
-export const PLATFORM = { instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', vimeo: 'Vimeo', web: 'Link', local: 'Archivo' };
+export const PLATFORM = { instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', vimeo: 'Vimeo', web: 'Link', local: 'Archivo' , cloud: 'Nube' };
 
 /** Dibujo representativo de un ejercicio (el momento clave del medio). */
 export function exerciseFigure(ex, size = 120, opts = {}) {

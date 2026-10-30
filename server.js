@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as ig from './instagram.js';
 import * as social from './social.js';
+import * as cloud from './cloud.js';
 import * as google from './google.js';
 import { createCollab, RULES } from './collab.js';
 
@@ -721,6 +722,8 @@ async function downloadWithYtDlp(url, more = []) {
  * Devuelve { file, mediaType, title }.
  */
 async function downloadSource(source) {
+  // Google Drive, Dropbox, OneDrive, MEGA: el archivo compartido, tal cual.
+  if (source.platform === 'cloud') return cloud.download(source.ref, UPLOAD_DIR, newId());
   if (source.platform === 'instagram' && ig.hasSession()) {
     try {
       return { ...(await ig.download(source, UPLOAD_DIR, newId())), title: null };
@@ -1144,6 +1147,82 @@ async function handleApi(req, res, parts) {
 
   // --- cuenta de Instagram (la sesión nunca sale del servidor) ---
   // --- otras redes: YouTube, TikTok, Facebook (la sesión nunca sale del servidor) ---
+  if (resource === 'copy' && !id && method === 'POST') {
+    // { videos, folders, target }: copias (con sus archivos) en la carpeta o biblioteca target.
+    // Una carpeta se copia entera, con sus subcarpetas. Los dibujos se quedan en el original.
+    const body = await readJson(req);
+    const dest = find('libraries', body.target, 'Carpeta');
+    const parentOf = (l) => (l.root ? null : l.id);
+    const libraries = [];
+    const videos = [];
+    const copyFile = async (name) => {
+      if (!name) return name;
+      const from = safeJoin(UPLOAD_DIR, name);
+      if (!from || !fs.existsSync(from)) return null;
+      const to = newId() + path.extname(name);
+      await fsp.copyFile(from, path.join(UPLOAD_DIR, to));
+      return to;
+    };
+    const copyVideo = async (v, libraryId) => {
+      const c = JSON.parse(JSON.stringify(v));
+      Object.assign(c, { id: newId(), libraryId, createdAt: now() });
+      delete c.addedBy;
+      delete c.updatedAt;
+      if (c.source?.file && !c.source.drive) c.source.file = await copyFile(c.source.file);
+      if (c.poster) c.poster = await copyFile(c.poster);
+      videos.push(c);
+    };
+    const copyFolder = async (l, parentId) => {
+      const c = { id: newId(), name: l.name, parentId, createdAt: now() };
+      libraries.push(c);
+      for (const v of db.videos.filter((x) => x.libraryId === l.id)) await copyVideo(v, c.id);
+      for (const sub of db.libraries.filter((x) => x.parentId === l.id)) await copyFolder(sub, c.id);
+    };
+    for (const vid of body.videos || []) await copyVideo(find('videos', vid, 'Video'), dest.id);
+    for (const fid of body.folders || []) {
+      const l = find('libraries', fid, 'Carpeta');
+      if (fid === dest.id || descendantsOf(fid).includes(dest.id)) throw fail(400, 'Una carpeta no se puede copiar dentro de sí misma');
+      await copyFolder(l, parentOf(dest));
+    }
+    db.libraries.push(...libraries);
+    db.videos.push(...videos);
+    await saveDb();
+    return send(res, 200, { libraries, videos: videos.map(forClient) });
+  }
+  if (resource === 'cloud' && id === 'import' && method === 'POST') {
+    // { url, libraryId }: un archivo va a esa carpeta; una carpeta, a una carpeta nueva dentro.
+    const body = await readJson(req);
+    const url = String(body.url || '').trim();
+    if (!/^https?:\/\//i.test(url) || !cloud.cloudOf(url)) throw fail(400, 'Pega el link compartido de Google Drive, Dropbox, OneDrive o MEGA.');
+    const target = db.libraries.find((l) => l.id === body.libraryId) || rootLibrary();
+    const found = await cloud.list(url);
+    try {
+      if (!found.items.length) throw fail(400, 'Ahí no hay videos ni fotos (o no se pueden ver con ese link).');
+      let lib = target;
+      if (found.folder) {
+        lib = { id: newId(), name: String(found.name).slice(0, 60), parentId: target.root ? null : target.id, createdAt: now() };
+        db.libraries.push(lib);
+      }
+      const created = [];
+      for (const it of found.items) {
+        const v = newVideo(lib.id, {
+          title: it.name.replace(/\.[^.]+$/, '').slice(0, 120),
+          source: { kind: 'link', url, platform: 'cloud', cloud: cloud.cloudOf(url), ref: it.ref, file: null, mediaType: null },
+        });
+        // De Dropbox, una carpeta ya viene bajada (en .zip): se guarda ya.
+        if (it.ref.local) {
+          Object.assign(v.source, await cloud.download(it.ref, UPLOAD_DIR, newId()));
+          delete v.source.ref.local;
+        }
+        created.push(v);
+      }
+      db.videos.push(...created);
+      await saveDb();
+      return send(res, 200, { library: lib, created: created.map(forClient) });
+    } finally {
+      await found.cleanup?.();
+    }
+  }
   if (resource === 'social') {
     if (!id && method === 'GET') return send(res, 200, social.status());
     if (social.NETS[id] && !action && method === 'POST') {
