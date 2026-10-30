@@ -779,17 +779,17 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 .card-pin:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 .card-pin.on { opacity: 1; background: var(--accent); border-color: var(--accent); color: #fff; transform: rotate(-20deg); }
 .tile:has(.card-pin.on) { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
-.pin-break { grid-column: 1 / -1; height: 1px; margin: 2px 0; background: linear-gradient(90deg, transparent, var(--line) 15%, var(--line) 85%, transparent); }
 .view-list .card-pin, .view-details .card-pin { top: 50%; transform: translateY(-50%); right: 44px; }
 .view-list .card-pin.on, .view-details .card-pin.on { transform: translateY(-50%) rotate(-20deg); }
-/* acceso directo a lo anclado (como los mensajes fijados de Telegram): salta, resalta y hace scroll */
+/* acceso directo a lo anclado (como los mensajes fijados de Telegram): salta, resalta y hace scroll.
+   Lo anclado ya no se mueve de su sitio; el botón enseña el nombre de a cuál lleva. */
 .pin-jump {
-  display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 12px; border-radius: 10px;
+  display: inline-flex; align-items: center; gap: 6px; height: 36px; max-width: 220px; padding: 0 12px; border-radius: 10px;
   border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); cursor: pointer; flex: none;
 }
-.pin-jump svg { width: 15px; height: 15px; }
+.pin-jump svg { width: 15px; height: 15px; flex: none; }
 .pin-jump:hover { background: var(--accent); color: #fff; }
-.pin-jump b { font-size: 0.82rem; font-weight: 700; }
+.pin-jump b { font-size: 0.82rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes pin-flash {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
   30% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 65%, transparent); }

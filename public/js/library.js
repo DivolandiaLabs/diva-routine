@@ -137,9 +137,19 @@ export function renderLibrary(root, libraryId) {
   ui.returnToDraw = null;
   let creating = null; // texto de avance mientras se sacan los dibujos
   const pasted = []; // imágenes pegadas en el cuadro de links: { file, url }
-  // Acceso directo a lo anclado (como los mensajes fijados de Telegram): cada clic salta al
-  // siguiente, lo resalta y hace scroll hasta él solo si no se ve ya en pantalla.
+  // Acceso directo a lo anclado (como los mensajes fijados de Telegram): el pin ya no mueve nada
+  // de sitio; solo se marca. Cada clic en el acceso salta al siguiente anclado, lo resalta y hace
+  // scroll hasta él solo si no se ve ya en pantalla. El botón muestra el nombre del que toca.
   let pinCursor = -1;
+  const setPinLabel = (tiles, at) => {
+    const jump = $('#pinJump');
+    if (!jump) return;
+    jump.hidden = tiles.length === 0;
+    if (!tiles.length) return;
+    const name = tiles[at].querySelector('.name-edit')?.textContent || '';
+    jump.querySelector('b').textContent = name;
+    jump.title = jump.ariaLabel = tiles.length > 1 ? `Ir a «${name}» (anclado ${at + 1} de ${tiles.length})` : `Ir a «${name}»`;
+  };
   // Un scroll suave hecho a mano: `scrollBy({behavior:'smooth'})` no siempre se anima bien
   // dentro de Electron, así que se anima el propio scrollY fotograma a fotograma. Si se salta
   // otra vez antes de que termine, esta sustituye a la anterior en vez de pelearse con ella.
@@ -168,6 +178,7 @@ export function renderLibrary(root, libraryId) {
     void tile.offsetWidth; // reinicia la animación si se vuelve a saltar al mismo
     tile.classList.add('pin-flash');
     tile.addEventListener('animationend', () => tile.classList.remove('pin-flash'), { once: true });
+    setPinLabel(tiles, pinCursor);
     const barBottom = root.querySelector('.lib-top')?.getBoundingClientRect().bottom || 76;
     const rect = tile.getBoundingClientRect();
     if (rect.top < barBottom || rect.bottom > innerHeight) smoothScrollBy(rect.top - barBottom - 10);
@@ -534,9 +545,7 @@ export function renderLibrary(root, libraryId) {
   const visible = () => {
     const q = filters.q.trim().toLowerCase();
     if (q) return { libs: folders().filter((l) => l.name.toLowerCase().includes(q)), vids: state.videos.filter((v) => videoText(v).includes(q)) };
-    // Lo fijado con el pin va primero (en su orden); luego, lo demás.
-    const pinFirst = (list) => [...list.filter((x) => x.pinnedTop), ...list.filter((x) => !x.pinnedTop)];
-    return { libs: pinFirst(sortList(childFolders(folder?.id || null))), vids: pinFirst(sortList(videosOf(here()))) };
+    return { libs: sortList(childFolders(folder?.id || null)), vids: sortList(videosOf(here())) };
   };
   // Todo lo de aquí en el orden en que se ve. En «Mi orden», carpetas y videos van mezclados según
   // los hayas colocado (lo que nunca se colocó: las carpetas antes y luego por fecha).
@@ -647,21 +656,12 @@ export function renderLibrary(root, libraryId) {
     ].filter(Boolean).join(' · ');
     const tile = (it) => (it.kind === 'library' ? folderTile(it.x) : it.kind === 'routine' ? routineTile(it.x) : videoTile(it.x, searching));
     $('#grid').innerHTML = items.length
-      // Primera línea: lo fijado con el pin; debajo, lo demás (rutinas incluidas, en su sitio).
-      ? items.filter((it) => it.x.pinnedTop).map(tile).join('')
-        + (items.some((it) => it.x.pinnedTop) ? '<div class="pin-break" aria-hidden="true"></div>' : '')
-        + items.filter((it) => !it.x.pinnedTop).map(tile).join('')
+      ? items.map(tile).join('')
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
           <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`;
     drawSelection();
-    const nPinned = items.filter((it) => it.x.pinnedTop).length;
-    const jump = $('#pinJump');
-    if (jump) {
-      jump.hidden = nPinned === 0;
-      jump.querySelector('b').textContent = nPinned > 1 ? nPinned : '';
-      jump.title = jump.ariaLabel = nPinned > 1 ? `Ir a lo anclado (${nPinned})` : 'Ir a lo anclado';
-    }
     pinCursor = -1;
+    setPinLabel([...$('#grid').querySelectorAll('.tile:has(.card-pin.on)')], 0);
   };
 
   root.addEventListener('click', (e) => {
