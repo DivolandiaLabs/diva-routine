@@ -903,10 +903,31 @@ export function renderLibrary(root, libraryId) {
   let reorderAt = null;
   // Sobre otro elemento de aquí: delante o detrás. Sobre una carpeta, solo en sus bordes (en el
   // centro se mete dentro); sobre un video o una foto, según la mitad.
+  const ITEM = '#grid .tile[data-kind="video"], #grid .tile-folder';
+  // En un hueco entre recuadros (o tras el último): el más cercano en esa fila.
+  const nearestTile = (x, y) => {
+    let best = null;
+    for (const t of root.querySelectorAll(ITEM)) {
+      const r = t.getBoundingClientRect();
+      const dy = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+      const dx = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+      const d = dy * 4 + dx; // la fila manda
+      if (!best || d < best.d) best = { t, d };
+    }
+    return best?.t || null;
+  };
   const reorderOf = (under, x, y) => {
     if (!moving || moving.videos.length + moving.folders.length !== 1 || filters.q.trim()) return null;
-    const t = under?.closest?.('#grid .tile[data-kind="video"], #grid .tile-folder');
     const draggedId = moving.videos[0] || moving.folders[0];
+    let t = under?.closest?.(ITEM);
+    const inGap = !t && under?.closest?.('#grid') && !under.closest('[data-drop-lib]');
+    if (inGap) {
+      t = nearestTile(x, y);
+      if (!t || t.dataset.id === draggedId) return null;
+      const r = t.getBoundingClientRect();
+      const rows = ['list', 'details'].includes(view);
+      return { el: t, id: t.dataset.id, after: rows ? y > r.top + r.height / 2 : x > r.left + r.width / 2 };
+    }
     if (!t || t.dataset.id === draggedId) return null;
     const r = t.getBoundingClientRect();
     const rows = ['list', 'details'].includes(view);
@@ -917,6 +938,9 @@ export function renderLibrary(root, libraryId) {
   const clearReorder = () => root.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
   const endMove = () => {
     moving = null;
+    pointer = null;
+    cancelAnimationFrame(scrollRaf);
+    scrollRaf = 0;
     reorderAt = null;
     dropTarget = null;
     press = null;
@@ -956,15 +980,13 @@ export function renderLibrary(root, libraryId) {
     if (!tile || e.target.closest(NO_DRAG)) return;
     press = { x: e.clientX, y: e.clientY, tile };
   });
-  const onTileMove = (e) => {
-    if (press && !moving && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) startMove(press.tile, e);
-    if (!moving || !ghost) return;
-    e.preventDefault();
-    ghost.style.transform = `translate(${e.clientX - ghost.dataset.dx}px, ${e.clientY - ghost.dataset.dy}px) scale(0.55)`;
-    const under = document.elementFromPoint(e.clientX, e.clientY);
+  let pointer = null; // dónde está el ratón mientras se arrastra
+  let scrollRaf = 0;
+  const retarget = (x, y) => {
+    const under = document.elementFromPoint(x, y);
     clearReorder();
-    root.querySelectorAll('.drop-over').forEach((x) => x.classList.remove('drop-over'));
-    reorderAt = reorderOf(under, e.clientX, e.clientY);
+    root.querySelectorAll('.drop-over').forEach((el) => el.classList.remove('drop-over'));
+    reorderAt = reorderOf(under, x, y);
     dropTarget = null;
     if (reorderAt) return reorderAt.el.classList.add(reorderAt.after ? 'drop-after' : 'drop-before');
     const t = under?.closest?.('[data-drop-lib]');
@@ -972,6 +994,26 @@ export function renderLibrary(root, libraryId) {
       dropTarget = t;
       t.classList.add('drop-over');
     }
+  };
+  const autoScroll = () => {
+    scrollRaf = 0;
+    if (!moving || !pointer) return;
+    const edge = 90;
+    const v = pointer.y < edge ? -(edge - pointer.y) : pointer.y > innerHeight - edge ? pointer.y - (innerHeight - edge) : 0;
+    if (!v) return;
+    const before = scrollY;
+    scrollBy(0, Math.round(v / 3));
+    if (scrollY !== before) retarget(pointer.x, pointer.y);
+    scrollRaf = requestAnimationFrame(autoScroll);
+  };
+  const onTileMove = (e) => {
+    if (press && !moving && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) startMove(press.tile, e);
+    if (!moving || !ghost) return;
+    e.preventDefault();
+    pointer = { x: e.clientX, y: e.clientY };
+    ghost.style.transform = `translate(${e.clientX - ghost.dataset.dx}px, ${e.clientY - ghost.dataset.dy}px) scale(0.55)`;
+    retarget(e.clientX, e.clientY);
+    if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScroll);
   };
   const onTileUp = async (e) => {
     if (!moving) return (press = null);
