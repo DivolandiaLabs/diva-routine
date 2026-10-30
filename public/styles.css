@@ -704,3 +704,20 @@ a.shelf-tab:hover { color: inherit; background: var(--accent-soft); }
 .drop-menu button.ghost { font-weight: 400; color: var(--muted); }
 /* nube en Redes */
 .net-card .ig-add { margin-top: 6px; }
+
+/* ---------- barra de bibliotecas (más limpia) ---------- */
+.shelf-bar {
+  display: flex; align-items: center; gap: 4px; margin: -4px 0 14px; padding: 4px; overflow-x: auto; scrollbar-width: thin;
+  border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+.shelf-pill {
+  flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 7px 14px; border-radius: 10px; text-decoration: none; font-size: 0.9rem; font-weight: 500; color: var(--muted);
+  transition: background 0.15s, color 0.15s;
+}
+.shelf-pill:hover { background: var(--accent-soft); color: inherit; }
+.shelf-pill.on { background: var(--accent); color: #fff; font-weight: 600; }
+.shelf-bar .shelf-add { flex: none; width: 32px; height: 32px; margin-left: 2px; font-size: 1.15rem; }
+.drag-active .shelf-pill:not(.on) { outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -2px; }
+.shelf-pill.drop-over { outline: 2px solid var(--accent) !important; background: var(--accent-soft); color: var(--accent); }
+.lib-top .shelf-tab.on { font-size: 1.6rem; padding: 0; }

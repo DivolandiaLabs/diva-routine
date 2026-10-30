@@ -70,10 +70,13 @@ export function renderLibrary(root, libraryId) {
   const filters = { q: '' };
   // Pestañas con las bibliotecas: la abierta se ve grande; su nombre se cambia pulsándolo; + crea otra.
   // Se puede soltar en una pestaña lo que arrastras para llevarlo a esa biblioteca.
-  const shelfTabs = () => `<div class="shelf-tabs">${shelves().map((l) => l.id === shelf.id
-    ? `<h2 class="shelf-tab on" data-drop-lib="${l.id}"><span class="shelf-name" data-shelf-name="${l.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(l))}</span>${l.root ? '' : `<button class="shelf-del" data-shelf-del="${l.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(l))}">✕</button>`}</h2>`
-    : `<a class="shelf-tab" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" title="Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)">${esc(shelfName(l))}</a>`).join('')}
-    <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button></div>`;
+  // Barra fina con las bibliotecas (una línea; si no caben, se desliza) y, debajo, el nombre grande
+  // de la abierta, que se cambia pulsándolo. Se puede soltar en una pestaña lo que arrastras.
+  const shelfBar = () => `<nav class="shelf-bar" aria-label="Bibliotecas">${shelves().map((l) => `
+      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" title="${l.id === shelf.id ? 'Biblioteca abierta' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
+      <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button>
+    </nav>`;
+  const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
   // Vistas como en el explorador de archivos (se recuerda la elegida). Ctrl + rueda cambia de una a otra.
   const VIEWS = [
     ['xl', 'Iconos muy grandes'], ['l', 'Iconos grandes'], ['m', 'Iconos medianos'],
@@ -96,13 +99,14 @@ export function renderLibrary(root, libraryId) {
   root.innerHTML = `
     <div class="lib2">
       <section class="lib-main" id="main">
+        ${shelves().length > 1 || !folder ? shelfBar() : ''}
         <header class="lib-top">
           <nav class="crumbs">${folder
             ? `<a href="#/biblioteca/${shelf.id}" data-drop-lib="${shelf.id}" title="Suelta aquí para sacar a «${esc(shelfName(shelf))}»">${esc(shelfName(shelf))}</a><span>›</span>
                ${folderPath(folder).slice(0, -1).map((a) => `<a href="#/biblioteca/${a.id}" data-drop-lib="${a.id}" title="Suelta aquí para mover a «${esc(a.name)}»">${esc(a.name)}</a><span>›</span>`).join('')}
                <input id="libName" class="title-input" value="${esc(folder.name)}" aria-label="Nombre de la carpeta" title="Haz clic para cambiar el nombre">
                <button class="icon-btn" data-act="rename" title="Cambiar el nombre de la carpeta" aria-label="Cambiar el nombre">${PENCIL}</button>`
-            : shelfTabs()}</nav>
+            : shelfTitle()}</nav>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
           <span class="count" id="count"></span>
           <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
@@ -966,7 +970,7 @@ export function renderLibrary(root, libraryId) {
         await how.save(id, name);
         emit('data');
         // La pestaña de la biblioteca no se repinta con los datos: se cambia aquí.
-        root.querySelectorAll(`[data-shelf-name="${id}"]`).forEach((el) => (el.textContent = name));
+        root.querySelectorAll(`[data-shelf-name="${id}"], .shelf-pill[data-drop-lib="${id}"]`).forEach((el) => (el.textContent = name));
       } catch (err) {
         toast(err.message, 'error');
       }
