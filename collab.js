@@ -92,6 +92,7 @@ function strip(kind, r, sp) {
     delete o.root;
     delete o.igCollections;
     delete o.lists;
+    delete o.cloudFolders;
     if (r.id === sp.rootId) delete o.parentId;
   }
   if (kind === 'routines') {
@@ -108,6 +109,7 @@ function withLocal(kind, local, rec, sp) {
   if (kind === 'libraries') {
     if (local?.igCollections) r.igCollections = local.igCollections;
     if (local?.lists) r.lists = local.lists;
+    if (local?.cloudFolders) r.cloudFolders = local.cloudFolders;
     if (rec.id === sp.rootId) r.parentId = local?.parentId ?? null;
   }
   if (kind === 'routines' && local?.pinned) r.pinned = true;

@@ -722,7 +722,13 @@ async function downloadWithYtDlp(url, more = []) {
  * Devuelve { file, mediaType, title }.
  */
 async function downloadSource(source) {
-  // Google Drive, Dropbox, OneDrive, MEGA: el archivo compartido, tal cual.
+  // Google Drive, Dropbox, OneDrive, MEGA: el archivo compartido, tal cual. De tu propio Drive
+  // (cuenta conectada), con tu sesión de Google.
+  if (source.platform === 'cloud' && source.ref?.auth && source.ref.cloud === 'gdrive') {
+    const file = newId() + (path.extname(source.ref.name || '').toLowerCase() || '.mp4');
+    await google.downloadFile(source.ref.id, path.join(UPLOAD_DIR, file));
+    return { file, mediaType: IMAGE_EXT.has(path.extname(file)) ? 'image' : 'video' };
+  }
   if (source.platform === 'cloud') return cloud.download(source.ref, UPLOAD_DIR, newId());
   if (source.platform === 'instagram' && ig.hasSession()) {
     try {
@@ -1054,7 +1060,9 @@ async function handleApi(req, res, parts) {
     }
     if (id === 'login' && method === 'GET') {
       // Google vuelve a este ordenador (127.0.0.1) con el permiso; ver más abajo, en el servidor.
-      res.writeHead(302, { Location: google.loginUrl(`http://127.0.0.1:${PORT}/`) });
+      // ?drive=1: también el permiso para ver tus carpetas de Drive (Redes → Google Drive).
+      const wantDrive = new URL(req.url, 'http://x').searchParams.get('drive') === '1';
+      res.writeHead(302, { Location: google.loginUrl(`http://127.0.0.1:${PORT}/`, { drive: wantDrive }) });
       return res.end();
     }
     if (id === 'logout' && method === 'POST') {
@@ -1207,6 +1215,40 @@ async function handleApi(req, res, parts) {
     db.videos.push(...videos);
     await saveDb();
     return send(res, 200, { libraries, videos: videos.map(forClient) });
+  }
+  if (resource === 'cloud' && id === 'gdrive' && action === 'folders' && method === 'GET') {
+    // Tus carpetas de Google Drive (cuenta conectada en Redes), y si ya están importadas.
+    if (!google.status().driveRead) throw fail(400, 'Conecta primero tu Google Drive.');
+    const folders = await google.myDriveFolders();
+    return send(res, 200, { folders: folders.map((f) => ({ id: f.id, name: f.name, libraries: db.libraries.filter((l) => l.cloudFolders?.some((c) => c.id === f.id)).map((l) => l.id) })) });
+  }
+  if (resource === 'cloud' && id === 'gdrive' && action === 'import' && method === 'POST') {
+    // { id, name, parentId? }: una carpeta de tu Drive a una carpeta de aquí (la suya si ya la
+    // importaste: entonces solo trae lo nuevo).
+    const body = await readJson(req);
+    const media = await google.driveFolderMedia(String(body.id));
+    let lib = db.libraries.find((l) => l.cloudFolders?.some((c) => c.id === body.id));
+    const isNew = !lib;
+    if (isNew) lib = { id: newId(), name: String(body.name || 'Google Drive').slice(0, 60), parentId: validParent(body.parentId, null), createdAt: now() };
+    lib.cloudFolders ||= [];
+    let link = lib.cloudFolders.find((c) => c.id === body.id);
+    if (!link) lib.cloudFolders.push((link = { cloud: 'gdrive', id: String(body.id), name: String(body.name || ''), seen: [] }));
+    const seen = new Set(link.seen);
+    const created = [];
+    for (const f of media) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      created.push(newVideo(lib.id, {
+        title: f.name.replace(/\.[^.]+$/, '').slice(0, 120),
+        source: { kind: 'link', url: `https://drive.google.com/file/d/${f.id}/view`, platform: 'cloud', cloud: 'gdrive', ref: { cloud: 'gdrive', auth: true, id: f.id, name: f.name }, file: null, mediaType: null },
+      }));
+    }
+    link.seen = [...seen];
+    link.syncedAt = now();
+    if (isNew) db.libraries.push(lib);
+    db.videos.push(...created);
+    await saveDb();
+    return send(res, 200, { library: db.libraries.find((l) => l.id === lib.id) || lib, created });
   }
   if (resource === 'cloud' && id === 'import' && method === 'POST') {
     // { url, libraryId }: un archivo va a esa carpeta; una carpeta, a una carpeta nueva dentro.

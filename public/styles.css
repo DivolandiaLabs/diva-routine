@@ -802,3 +802,8 @@ body.tile-moving, body.tile-moving * { cursor: grabbing !important; user-select:
 .ghost-count { position: absolute; top: -10px; right: -10px; min-width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 1.1rem; box-shadow: 0 2px 8px rgb(0 0 0 / 0.4); }
 /* rutinas en la cuadrícula: a la misma altura que las carpetas (que llevan su pestaña arriba) */
 .tiles:not(.view-list):not(.view-details) .tile-routine { margin-top: 9px; }
+/* acerca de */
+.set-card.about { display: flex; gap: 22px; align-items: flex-start; }
+.about-logo { width: 84px; height: 84px; flex: none; border-radius: 20px; }
+.set-card.about a { color: var(--accent); }
+@media (max-width: 640px) { .set-card.about { flex-direction: column; } }

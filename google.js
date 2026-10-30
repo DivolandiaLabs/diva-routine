@@ -26,6 +26,8 @@ const PUBLIC_DL = process.env.GOOGLE_PUBLIC_DL || 'https://drive.usercontent.goo
 // drive.appdata: tu carpeta privada de la app; drive.file: solo los archivos que crea la app
 // (los videos que compartes). Ninguno da acceso al resto de tu Drive.
 const SCOPES = 'openid email https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file';
+// Solo si conectas tu Google Drive en Redes: ver (no cambiar) tus carpetas para importarlas.
+const DRIVE_READ = 'https://www.googleapis.com/auth/drive.readonly';
 
 let CLIENT_FILE;
 let FIREBASE_FILE;
@@ -93,11 +95,45 @@ export const status = () => ({
   configured: Boolean(loadClient()?.client_id),
   connected: Boolean(tokens?.refresh_token),
   email: tokens?.email || null,
+  driveRead: hasDriveRead(),
   name: tokens?.name || null,
   picture: tokens?.picture || null,
   firebase: Boolean(loadFirebase()?.apiKey),
   firebaseProject: loadFirebase()?.projectId || null,
 });
+/** ¿Dio permiso para ver sus carpetas de Drive? */
+function hasDriveRead() {
+  return Boolean(tokens?.scope?.split(' ').includes(DRIVE_READ));
+}
+
+const VIDEO_MIME = "(mimeType contains 'video/' or mimeType contains 'image/')";
+/** Tus carpetas de Google Drive (con permiso de lectura). */
+export async function myDriveFolders() {
+  const out = [];
+  let pageToken = '';
+  do {
+    const q = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+    const res = await drive(`/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,modifiedTime)&orderBy=name&pageSize=1000${pageToken ? `&pageToken=${pageToken}` : ''}&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    const d = await res.json();
+    out.push(...(d.files || []));
+    pageToken = d.nextPageToken || '';
+  } while (pageToken && out.length < 5000);
+  return out.filter((f) => f.name !== 'Diva Routine · compartido');
+}
+/** Videos y fotos de una carpeta de tu Drive. */
+export async function driveFolderMedia(folderId) {
+  const out = [];
+  let pageToken = '';
+  do {
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed = false and ${VIDEO_MIME}`);
+    const res = await drive(`/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,mimeType)&orderBy=name&pageSize=1000${pageToken ? `&pageToken=${pageToken}` : ''}&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    const d = await res.json();
+    out.push(...(d.files || []));
+    pageToken = d.nextPageToken || '';
+  } while (pageToken);
+  return out;
+}
+
 export const connected = () => Boolean(loadClient()?.client_id && tokens?.refresh_token);
 export const email = () => tokens?.email || null;
 /** Se puede compartir con otras personas: sesión de Google y Firebase configurado. */
@@ -149,7 +185,7 @@ export async function setClient(input) {
 const b64url = (buf) => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /** URL de Google para iniciar sesión. Google vuelve a `redirect` con ?code=…&state=… */
-export function loginUrl(redirect) {
+export function loginUrl(redirect, { drive = false } = {}) {
   if (!loadClient()) throw Object.assign(new Error('Primero añade el identificador de Google (Ajustes).'), { status: 400 });
   const verifier = b64url(crypto.randomBytes(32));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
@@ -160,7 +196,8 @@ export function loginUrl(redirect) {
     client_id: client.client_id,
     redirect_uri: redirect,
     response_type: 'code',
-    scope: SCOPES,
+    scope: drive || hasDriveRead() ? `${SCOPES} ${DRIVE_READ}` : SCOPES,
+    include_granted_scopes: 'true',
     access_type: 'offline', // para poder seguir sincronizando sin volver a pedir permiso
     prompt: 'consent',
     code_challenge: challenge,
@@ -204,7 +241,7 @@ export async function finishLogin(code, state) {
     /* sin correo: solo es para mostrarlo */
   }
   if (!t.refresh_token) throw gError('Google no dio permiso para seguir sincronizando. Vuelve a intentarlo.');
-  tokens = { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in - 60) * 1000, email };
+  tokens = { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in - 60) * 1000, email, scope: t.scope || '' };
   await saveTokens();
   await loadProfile().catch(() => {});
   return status();

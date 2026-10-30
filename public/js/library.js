@@ -232,12 +232,13 @@ export function renderLibrary(root, libraryId) {
   const savedCache = {};
   const savedChecked = new Set();
   const SAVED_HINT = {
+    gdrive: 'Tus carpetas de Google Drive, con sus videos y fotos.',
     instagram: 'Tus colecciones de Guardados, también las privadas.',
     youtube: 'Tus listas, «Ver más tarde» y «Me gusta».',
     tiktok: 'Tus colecciones y perfiles.',
     facebook: 'Tus videos guardados.',
   };
-  const isImported = (key, id) => state.libraries.some((l) => (key === 'instagram' ? l.igCollections?.some((c) => c.id === id) : l.lists?.some((x) => x.url === id)));
+  const isImported = (key, id) => state.libraries.some((l) => (key === 'instagram' ? l.igCollections?.some((c) => c.id === id) : key === 'gdrive' ? l.cloudFolders?.some((c) => c.id === id) : l.lists?.some((x) => x.url === id)));
 
   const savedBody = (key) => {
     if (key === 'tiktok' || key === 'facebook') {
@@ -286,6 +287,9 @@ export function renderLibrary(root, libraryId) {
       if (key === 'instagram') {
         const { collections } = await api.igCollections();
         savedCache[key] = { items: collections.map((c) => ({ id: c.id, name: c.name, count: c.count ?? null })) };
+      } else if (key === 'gdrive') {
+        const { folders } = await api.driveFolders();
+        savedCache[key] = { items: folders.map((x) => ({ id: x.id, name: x.name, count: null })) };
       } else {
         const { lists } = await api.youtubeLists();
         savedCache[key] = { items: lists.map((l) => ({ id: l.url, name: l.name, count: null })) };
@@ -296,6 +300,24 @@ export function renderLibrary(root, libraryId) {
     if (panel === 'instagram') drawPanel();
   };
 
+  const connectDrive = async (btn) => {
+    if (!state.google?.connected) return toast('Primero inicia sesión con tu cuenta de Google (Ajustes).', 'error');
+    window.open('/api/google/login?drive=1', '_blank');
+    btn.disabled = true;
+    btn.textContent = 'Esperando el permiso en el navegador…';
+    for (let i = 0; i < 150; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const g = await api.google().catch(() => null);
+      if (g?.driveRead) {
+        state.google = { ...state.google, ...g };
+        toast('Google Drive conectado');
+        if (panel === 'instagram') drawPanel();
+        return;
+      }
+    }
+    btn.disabled = false;
+    btn.textContent = 'Conectar cuenta';
+  };
   const finishImport = async (created, libs) => {
     await refresh();
     emit('data');
@@ -312,7 +334,9 @@ export function renderLibrary(root, libraryId) {
     try {
       for (const [i, it] of items.entries()) {
         $(`#savedBusy-${key}`).textContent = `Importando «${it.name}» (${i + 1} de ${items.length})…`;
-        const r = key === 'instagram' ? await api.igImport({ id: it.id, name: it.name }, null, topParent()) : await api.importList(it.id, it.name, null, topParent());
+        const r = key === 'instagram' ? await api.igImport({ id: it.id, name: it.name }, null, topParent())
+          : key === 'gdrive' ? await api.driveImport({ id: it.id, name: it.name }, topParent())
+          : await api.importList(it.id, it.name, null, topParent());
         upsert('libraries', r.library);
         r.created.forEach((v) => upsert('videos', v));
         created.push(...r.created);
@@ -351,7 +375,7 @@ export function renderLibrary(root, libraryId) {
   const PANELS = {
     import: () => `
       ${panelHead('Importar')}
-      <textarea id="links" rows="6" placeholder="Pega aquí links de YouTube o Instagram, una lista de reproducción, una colección de tus Guardados… o una imagen (clic derecho → Pegar, o Ctrl+V)"></textarea>
+      <textarea id="links" rows="6" placeholder="Pega aquí links de YouTube, Instagram, TikTok, Google Drive, Dropbox, OneDrive o MEGA (un archivo o una carpeta), una lista de reproducción… o una imagen (clic derecho → Pegar, o Ctrl+V)"></textarea>
       <div class="paste-thumbs" id="pasteThumbs"></div>
       <label class="field">Importar en<select id="target">${libraryOptions(here())}</select></label>
       <div class="row wrap">
@@ -371,8 +395,9 @@ export function renderLibrary(root, libraryId) {
     instagram: () => {
       const card = (key) => {
         const ig = key === 'instagram';
-        const n = ig ? { name: 'Instagram', color: '#e1306c' } : NET_INFO[key];
-        const on = ig ? state.instagram.connected : state.social?.[key]?.connected;
+        const gd = key === 'gdrive';
+        const n = ig ? { name: 'Instagram', color: '#e1306c' } : gd ? { name: 'Google Drive', color: CLOUDS.gdrive.color } : NET_INFO[key];
+        const on = ig ? state.instagram.connected : gd ? Boolean(state.google?.connected && state.google?.driveRead) : state.social?.[key]?.connected;
         const expired = ig && state.instagram.expired;
         const who = ig && state.instagram.username ? ` como <b>@${esc(state.instagram.username)}</b>` : '';
         const body = on
@@ -385,16 +410,17 @@ export function renderLibrary(root, libraryId) {
           : `<p class="hint">${expired ? 'La sesión caducó: vuelve a conectarla.' : SAVED_HINT[key]}</p>
              <div class="row"><button class="btn primary small" data-net-connect="${key}">${expired ? 'Volver a conectar' : 'Conectar cuenta'}</button></div>`;
         return `<section class="net-card" style="--net:${n.color}">
-          <h4>${ig ? ICON.instagram : NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${body}</section>`;
+          <h4>${ig ? ICON.instagram : gd ? CLOUDS.gdrive.icon : NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${body}</section>`;
       };
       return `${panelHead('Redes sociales')}
         ${['instagram', 'youtube', 'tiktok', 'facebook'].map(card).join('')}
         <h4 class="sh-sub">Nube</h4>
-        <p class="hint">Pega el link compartido de un archivo o de una carpeta: una carpeta entra como carpeta nueva, con sus videos y fotos.</p>
-        ${Object.entries(CLOUDS).map(([key, c]) => `<section class="net-card" style="--net:${c.color}">
-          <h4>${c.icon}${c.name}</h4>
-          <div class="row ig-add"><input id="cloudUrl-${key}" placeholder="Link compartido de ${c.name}" aria-label="Link de ${c.name}"><button class="btn small primary" data-cloud-import="${key}">Importar</button></div>
-        </section>`).join('')}`;
+        ${card('gdrive')}
+        ${['dropbox', 'onedrive', 'mega'].map((key) => `<section class="net-card" style="--net:${CLOUDS[key].color}">
+          <h4>${CLOUDS[key].icon}${CLOUDS[key].name}</h4>
+          <p class="hint">Pega sus links compartidos (de un archivo o de una carpeta) en <b>Importar</b>. Enlazar la cuenta llegará pronto.</p>
+        </section>`).join('')}
+        <p class="hint">Los links compartidos de Google Drive, Dropbox, OneDrive y MEGA se pegan en <b>Importar</b>: una carpeta entra como carpeta nueva, con sus videos y fotos.</p>`;
     },
 
     draw: () => {
@@ -752,16 +778,32 @@ export function renderLibrary(root, libraryId) {
     drawPasted();
   });
 
+  // Links de Google Drive, Dropbox, OneDrive o MEGA (un archivo o una carpeta entera).
+  const CLOUD_RE = /drive\.google\.com|docs\.google\.com|dropbox\.com|1drv\.ms|onedrive\.live\.com|sharepoint\.com|mega\.nz|mega\.co\.nz/i;
   async function importAll() {
-    const urls = $('#links').value.split(/\s+/).filter(importable);
+    const all = $('#links').value.split(/\s+/).filter(importable);
+    const clouds = all.filter((u) => CLOUD_RE.test(u));
+    const urls = all.filter((u) => !CLOUD_RE.test(u));
     const files = pasted.map((p) => p.file);
-    if (!urls.length && !files.length) return toast('Pega links o una imagen en el cuadro', 'error');
+    if (!all.length && !files.length) return toast('Pega links o una imagen en el cuadro', 'error');
     const target = importTarget();
     if (files.length) {
       clearPasted();
       await importFiles(files, target);
     }
-    await importLinks(urls, target);
+    for (const u of clouds) {
+      try {
+        toast('Leyendo el link de la nube…');
+        const r = await api.cloudImport(u, target);
+        upsert('libraries', r.library);
+        r.created.forEach((v) => upsert('videos', v));
+        await finishImport(r.created, new Set());
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    }
+    if (urls.length) await importLinks(urls, target);
+    if (clouds.length) $('#links').value = '';
     drawPasted();
   }
 
@@ -1375,11 +1417,13 @@ export function renderLibrary(root, libraryId) {
     const netConnect = t.closest('[data-net-connect]');
     if (netConnect) {
       const key = netConnect.dataset.netConnect;
+      if (key === 'gdrive') return connectDrive(netConnect);
       return key === 'instagram' ? openInstagram({ view: 'connect' }) : openNet(key);
     }
     const netOff = t.closest('[data-net-off]');
     if (netOff) {
       const key = netOff.dataset.netOff;
+      if (key === 'gdrive') return toast('Para quitar el permiso de Drive, en Ajustes cierra la sesión de Google y vuelve a entrar.');
       const name = key === 'instagram' ? 'Instagram' : NET_INFO[key].name;
       if (!await ask(`¿Desconectar tu cuenta de ${name}? Lo importado se queda.`)) return;
       if (key === 'instagram') state.instagram = await api.igDisconnect();
@@ -1390,26 +1434,6 @@ export function renderLibrary(root, libraryId) {
       delete savedCache[key];
       emit('data');
       return toast(`${name} desconectado`);
-    }
-    const cloudBtn = t.closest('[data-cloud-import]');
-    if (cloudBtn) {
-      const input = $(`#cloudUrl-${cloudBtn.dataset.cloudImport}`);
-      const url = input.value.trim();
-      if (!URL_RE.test(url)) return input.focus();
-      cloudBtn.disabled = true;
-      cloudBtn.textContent = 'Leyendo…';
-      try {
-        const r = await api.cloudImport(url, here());
-        upsert('libraries', r.library);
-        r.created.forEach((v) => upsert('videos', v));
-        input.value = '';
-        await finishImport(r.created, new Set(r.library.id !== here() ? [r.library.id] : []));
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-      cloudBtn.disabled = false;
-      cloudBtn.textContent = 'Importar';
-      return;
     }
     const savedImport = t.closest('[data-saved-import]');
     if (savedImport) return importSaved(savedImport.dataset.savedImport, savedImport);

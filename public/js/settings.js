@@ -185,6 +185,22 @@ export function renderSettings(root) {
             <p>Puedes tener la app abierta en dos ordenadores, y cada uno ve los cambios del otro en unos segundos; pero si los dos cambian lo mismo a la vez, se queda el último. La app avisa arriba cuando está abierta en otro ordenador.</p>
           </details>
         </details>
+        <section class="set-card about" id="aboutCard">
+          <img class="about-logo" src="/logo.png" alt="">
+          <div>
+            <h3>Acerca de Diva Routine</h3>
+            <p>Rutinas de baile a partir de tus videos: los movimientos dibujados con IA, tablas para imprimir y todo sincronizado con tu cuenta de Google.</p>
+            <dl class="set-list">
+              ${upd?.current ? `<dt>Versión</dt><dd>${esc(upd.current)}</dd>` : ''}
+              <dt>Desarrollado por</dt><dd><b>Divolandia Labs</b> · Barcelona</dd>
+              <dt>Web</dt><dd><a href="https://divolandialabs.github.io/" target="_blank" rel="noopener">divolandialabs.github.io</a></dd>
+              <dt>Página de la app</dt><dd><a href="https://divolandialabs.github.io/diva-routine/" target="_blank" rel="noopener">divolandialabs.github.io/diva-routine</a></dd>
+              <dt>Código</dt><dd><a href="https://github.com/DivolandiaLabs/diva-routine" target="_blank" rel="noopener">github.com/DivolandiaLabs/diva-routine</a></dd>
+              <dt>Ayuda</dt><dd><a href="https://github.com/DivolandiaLabs/diva-routine/issues" target="_blank" rel="noopener">Cuéntanos un problema o una idea</a></dd>
+            </dl>
+            <p class="hint">© ${new Date().getFullYear()} Divolandia Labs. Todos los derechos reservados.</p>
+          </div>
+        </section>
       </div>`;
   };
 
