@@ -132,16 +132,19 @@ input:focus, textarea:focus, select:focus, .btn:focus-visible, .tl:focus-visible
   position: sticky; top: 76px; z-index: 5; background: var(--bg);
   display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; min-height: 44px; flex-wrap: wrap;
 }
-/* ancho fluido: se encoge y crece con el hueco disponible en vez de saltar entre
-   240px fijos y el 100% del móvil, que quedaba desproporcionado en anchos intermedios */
-.lib-top input[type="search"] { flex: 1 1 200px; max-width: 320px; min-width: 150px; margin-left: auto; }
-/* el grupo de herramientas (contador, acceso a lo anclado, orden, vistas) se mueve en bloque */
-.lib-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* ancho fluido: se encoge con el hueco disponible en vez de saltar entre 240px fijos
+   y el 100% del móvil. No crece (antes competía con el título por el hueco libre y
+   se salía de la ventana); el margen automático es lo único que lo empuja a la derecha. */
+.lib-top input[type="search"] { flex: 0 1 220px; min-width: 140px; margin-left: auto; }
+/* el grupo de herramientas (contador, acceso a lo anclado, orden, vistas) se mueve en bloque.
+   min-width: 0 es necesario para que pueda encogerse por debajo de su contenido y sus propios
+   hijos salten de línea en vez de forzar a toda la cabecera a desbordar la ventana. */
+.lib-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; }
 .lib-tools .count {
   display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 10px;
   border: 1px solid var(--line); background: var(--surface-2);
 }
-.crumbs { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 220px; }
+.crumbs { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 220px; }
 .crumbs h2 { font-size: 1.4rem; }
 .crumbs a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 1.05rem; white-space: nowrap; }
 .crumbs a:hover { color: var(--accent); }
@@ -522,7 +525,7 @@ input.sheet-title { width: 100%; font-size: 1.7rem; font-weight: 800; border: 1p
   #app { padding: 16px; padding-bottom: 140px; }
   .vgrid { grid-template-columns: 1fr; }
   /* móvil: el menú pasa a una barra abajo y el panel ocupa el ancho */
-  .lib2 { grid-template-columns: 1fr; }
+  .lib2 { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .opts { position: fixed; z-index: 20; top: auto; bottom: 10px; left: 10px; right: 10px; display: flex; overflow-x: auto; border-radius: 18px; }
   .opt { flex: none; width: 60px; }
@@ -538,7 +541,7 @@ input.sheet-title { width: 100%; font-size: 1.7rem; font-weight: 800; border: 1p
 }
 /* en móvil de verdad, si el buscador queda solo en su línea, que ocupe todo el ancho */
 @media (max-width: 520px) {
-  .lib-top input[type="search"] { max-width: none; flex-basis: 100%; margin-left: 0; }
+  .lib-top input[type="search"] { flex: 1 1 100%; min-width: 0; margin-left: 0; }
 }
 
 /* ---------- tutorial: conectar Instagram ---------- */
