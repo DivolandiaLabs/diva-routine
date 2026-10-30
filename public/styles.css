@@ -132,7 +132,9 @@ input:focus, textarea:focus, select:focus, .btn:focus-visible, .tl:focus-visible
   position: sticky; top: 76px; z-index: 5; background: var(--bg);
   display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; min-height: 44px; flex-wrap: wrap;
 }
-.lib-top input[type="search"] { width: 240px; margin-left: auto; }
+/* ancho fluido: se encoge y crece con el hueco disponible en vez de saltar entre
+   240px fijos y el 100% del móvil, que quedaba desproporcionado en anchos intermedios */
+.lib-top input[type="search"] { flex: 1 1 200px; max-width: 320px; min-width: 150px; margin-left: auto; }
 /* el grupo de herramientas (contador, acceso a lo anclado, orden, vistas) se mueve en bloque */
 .lib-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .lib-tools .count {
@@ -521,7 +523,6 @@ input.sheet-title { width: 100%; font-size: 1.7rem; font-weight: 800; border: 1p
   .vgrid { grid-template-columns: 1fr; }
   /* móvil: el menú pasa a una barra abajo y el panel ocupa el ancho */
   .lib2 { grid-template-columns: 1fr; }
-  .lib-top input[type="search"] { width: 100%; margin-left: 0; }
   .tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .opts { position: fixed; z-index: 20; top: auto; bottom: 10px; left: 10px; right: 10px; display: flex; overflow-x: auto; border-radius: 18px; }
   .opt { flex: none; width: 60px; }
@@ -534,6 +535,10 @@ input.sheet-title { width: 100%; font-size: 1.7rem; font-weight: 800; border: 1p
   .routine-table td { border: 0; padding: 6px; }
   .c-seq, .c-tech { grid-column: 1 / -1; width: auto !important; }
   .c-name { width: auto; }
+}
+/* en móvil de verdad, si el buscador queda solo en su línea, que ocupe todo el ancho */
+@media (max-width: 520px) {
+  .lib-top input[type="search"] { max-width: none; flex-basis: 100%; margin-left: 0; }
 }
 
 /* ---------- tutorial: conectar Instagram ---------- */
