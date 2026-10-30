@@ -607,3 +607,5 @@ body.login-mode .topbar { display: none; }
 .set-fold[open] > summary::before { transform: rotate(90deg); }
 .set-fold > summary h3 { margin: 0; }
 .set-fold[open] > summary { margin-bottom: 12px; }
+.account { overflow: hidden; }
+.account img { width: 100%; height: 100%; object-fit: cover; display: block; }

@@ -88,6 +88,7 @@ google.initGoogle({
   firebaseFile: process.env.JR_FIREBASE ? path.resolve(process.env.JR_FIREBASE) : path.join(ROOT, 'firebase-config.json'),
   localDir: LOCAL_DIR,
 });
+google.loadProfile().catch(() => {}); // foto de la cuenta, si aún no la tiene
 
 const newId = () => crypto.randomBytes(6).toString('hex');
 const now = () => new Date().toISOString();

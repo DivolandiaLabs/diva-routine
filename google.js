@@ -93,6 +93,8 @@ export const status = () => ({
   configured: Boolean(loadClient()?.client_id),
   connected: Boolean(tokens?.refresh_token),
   email: tokens?.email || null,
+  name: tokens?.name || null,
+  picture: tokens?.picture || null,
   firebase: Boolean(loadFirebase()?.apiKey),
   firebaseProject: loadFirebase()?.projectId || null,
 });
@@ -204,7 +206,16 @@ export async function finishLogin(code, state) {
   if (!t.refresh_token) throw gError('Google no dio permiso para seguir sincronizando. Vuelve a intentarlo.');
   tokens = { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in - 60) * 1000, email };
   await saveTokens();
+  await loadProfile().catch(() => {});
   return status();
+}
+
+/** Nombre y foto de la cuenta (para mostrarlos arriba). Drive los da sin pedir más permisos. */
+export async function loadProfile() {
+  if (!tokens || tokens.picture !== undefined) return;
+  const { user } = await (await drive('/drive/v3/about?fields=user(displayName,photoLink)')).json();
+  tokens = { ...tokens, name: user?.displayName || null, picture: user?.photoLink || null };
+  await saveTokens();
 }
 
 export async function logout() {

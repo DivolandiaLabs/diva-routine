@@ -107,8 +107,18 @@ function drawAccount(g) {
   if (!el) return;
   el.hidden = !g?.connected;
   if (!g?.connected) return;
-  el.textContent = (g.email || 'Google')[0].toUpperCase();
-  el.title = `Sesión iniciada como ${g.email || 'Google'}`;
+  el.title = `Sesión iniciada como ${g.name ? `${g.name} (${g.email})` : g.email || 'Google'}`;
+  if (el.dataset.pic === (g.picture || '')) return;
+  el.dataset.pic = g.picture || '';
+  const initial = (g.name || g.email || 'G')[0].toUpperCase();
+  if (!g.picture) return (el.textContent = initial);
+  // La foto de perfil de Google; si no carga, se queda la inicial.
+  const img = document.createElement('img');
+  img.src = g.picture;
+  img.alt = '';
+  img.referrerPolicy = 'no-referrer';
+  img.onerror = () => (el.textContent = initial);
+  el.replaceChildren(img);
 }
 
 // Al abrir la app, las bibliotecas enlazadas a colecciones de Instagram se ponen al día
@@ -147,6 +157,7 @@ function watchForUpdates(loaded) {
       }
       drawOthers(v.others || []);
       drawGoogle(v.google, v.collab);
+      drawAccount(v.google);
       drawUpdate(v.update);
     } catch {
       /* servidor apagado: ya avisará la siguiente acción */
