@@ -6,6 +6,7 @@ import { phasesSVG } from './figure.js';
 import {
   state, refresh, emit, esc, toast, fmtTime, exerciseById, videoById, routineById, exerciseFigure,
   ui, drawings, routineFrom, pinRoutines, removeRoutine, spaceFor, addedByOther, who, sharedLabel,
+  ask,
 } from './store.js';
 import { openShare, SHARE_TAG } from './share.js';
 
@@ -213,7 +214,7 @@ export function renderRoutines(root) {
     const received = (type, id) => (spaceFor(type, id) && !spaceFor(type, id).mine ? spaceFor(type, id) : null);
     const nLeave = exIds.filter((id) => received('drawing', id)).length + rtIds.filter((id) => received('routine', id)).length;
     const shared = exIds.some((id) => spaceFor('drawing', id)?.mine) || rtIds.some((id) => spaceFor('routine', id)?.mine);
-    if (!confirm(`¿Borrar ${parts.join(' y ')}?${exIds.length ? ' Los dibujos borrados salen también de las rutinas (los videos no se borran).' : ''}${nLeave ? ` De ${nLeave === 1 ? 'lo que te compartieron' : `las ${nLeave} cosas que te compartieron`}, solo sales tú.` : ''}${shared ? ' Lo que compartes dejará de verse para los demás.' : ''} No se puede deshacer.`)) return;
+    if (!await ask(`¿Borrar ${parts.join(' y ')}?${exIds.length ? ' Los dibujos borrados salen también de las rutinas (los videos no se borran).' : ''}${nLeave ? ` De ${nLeave === 1 ? 'lo que te compartieron' : `las ${nLeave} cosas que te compartieron`}, solo sales tú.` : ''}${shared ? ' Lo que compartes dejará de verse para los demás.' : ''} No se puede deshacer.`)) return;
     try {
       for (const id of exIds) {
         const sp = received('drawing', id);

@@ -721,3 +721,11 @@ a.shelf-tab:hover { color: inherit; background: var(--accent-soft); }
 .drag-active .shelf-pill:not(.on) { outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -2px; }
 .shelf-pill.drop-over { outline: 2px solid var(--accent) !important; background: var(--accent-soft); color: var(--accent); }
 .lib-top .shelf-tab.on { font-size: 1.6rem; padding: 0; }
+
+/* ---------- pregunta antes de algo importante ---------- */
+dialog.ask { max-width: 440px; width: calc(100% - 32px); padding: 22px 22px 18px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); color: inherit; box-shadow: 0 24px 60px rgb(0 0 0 / 0.45); }
+dialog.ask::backdrop { background: rgb(0 0 0 / 0.55); backdrop-filter: blur(2px); }
+dialog.ask p { margin: 0 0 18px; line-height: 1.5; font-size: 0.98rem; }
+dialog.ask footer { display: flex; justify-content: flex-end; gap: 10px; }
+.btn.danger-solid { background: #c62f24; border-color: #c62f24; color: #fff; }
+.btn.danger-solid:hover { background: #a8261d; border-color: #a8261d; }

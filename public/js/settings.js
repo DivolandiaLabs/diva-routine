@@ -3,7 +3,7 @@
 // que todos usen la misma carpeta compartida (un disco de la red, OneDrive…). Y, para compartir
 // con otras personas, configurar Firebase.
 import { api } from './api.js';
-import { esc, toast, sleep } from './store.js';
+import { esc, toast, sleep, ask } from './store.js';
 
 export function renderSettings(root) {
   root.innerHTML = '<div class="settings"><p class="hint">Cargando…</p></div>';
@@ -221,7 +221,7 @@ export function renderSettings(root) {
         changingClient = act === 'change-client';
         drawGoogle();
       } else if (act === 'logout') {
-        if (!confirm('¿Cerrar la sesión de Google en este ordenador? Tus datos se quedan aquí y en tu Drive; solo deja de sincronizar hasta que vuelvas a iniciar sesión.')) return;
+        if (!await ask('¿Cerrar la sesión de Google en este ordenador? Tus datos se quedan aquí y en tu Drive; solo deja de sincronizar hasta que vuelvas a iniciar sesión.')) return;
         g = await api.googleLogout();
         try { localStorage.removeItem("jr-login-skip"); } catch {}
         return location.reload();
@@ -303,7 +303,7 @@ export function renderSettings(root) {
     const msg = local
       ? 'Este ordenador volverá a usar su carpeta propia, con los datos que tenía antes de compartir (los cambios hechos en la compartida no estarán). ¿Seguir?'
       : `Se usará «${dir}».\n\n· Si esa carpeta ya tiene datos (de otro ordenador), se usarán esos; los de este ordenador se quedan donde están.\n· Si está vacía, se copiarán allí los de ahora (${info.sizeMB ?? '?'} MB, videos incluidos; puede tardar unos minutos).\n\nLa app se reiniciará. ¿Seguir?`;
-    if (!confirm(msg)) return;
+    if (!await ask(msg)) return;
     root.querySelectorAll('button').forEach((b) => (b.disabled = true));
     root.querySelector('#busy').textContent = local ? 'Cambiando…' : 'Preparando la carpeta (si hay que copiar, puede tardar)…';
     try {

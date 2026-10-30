@@ -1,7 +1,7 @@
 // Ventana para compartir una carpeta, una rutina o un dibujo con otras personas (por su Gmail).
 // Lo ven en su propia app al iniciar sesión con esa cuenta de Google.
 import { api } from './api.js';
-import { state, refresh, emit, esc, toast, libraryById, routineById, exerciseById, spaceFor, who } from './store.js';
+import { state, refresh, emit, esc, toast, libraryById, routineById, exerciseById, spaceFor, who, ask } from './store.js';
 
 const WHAT = {
   folder: {
@@ -135,7 +135,7 @@ export function openShare(type, id) {
     const sp = spaceFor(type, id);
     if (t.dataset.shRemove) {
       const m = t.dataset.shRemove;
-      if (!confirm(`¿Quitar a ${m}? Dejará de verlo en su app.`)) return;
+      if (!await ask(`¿Quitar a ${m}? Dejará de verlo en su app.`)) return;
       return run('Quitando…', async () => {
         await api.removeMember(sp.id, m);
         return `${m} ya no lo ve.`;
@@ -145,7 +145,7 @@ export function openShare(type, id) {
     if (act === 'close') return dlg.close();
     if (act === 'add') return invite();
     if (act === 'stop') {
-      if (!confirm('¿Dejar de compartirlo? Las demás personas dejarán de verlo. Tú lo conservas, con lo que hayan añadido.')) return;
+      if (!await ask('¿Dejar de compartirlo? Las demás personas dejarán de verlo. Tú lo conservas, con lo que hayan añadido.')) return;
       await run('Dejando de compartir…', async () => {
         await api.leaveSpace(sp.id);
         await refresh();
@@ -154,7 +154,7 @@ export function openShare(type, id) {
       return;
     }
     if (act === 'leave') {
-      if (!confirm(`¿Salir? Dejará de estar en tu app${type === 'folder' ? ' (lo que añadiste tú a la carpeta se queda en tu Biblioteca)' : ''}.`)) return;
+      if (!await ask(`¿Salir? Dejará de estar en tu app${type === 'folder' ? ' (lo que añadiste tú a la carpeta se queda en tu Biblioteca)' : ''}.`)) return;
       busy = 'Saliendo…';
       draw();
       try {

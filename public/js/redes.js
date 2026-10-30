@@ -1,7 +1,7 @@
 // Ventana de YouTube, TikTok y Facebook: tutorial para conectar tu cuenta (pegando tu sesión,
 // como con Instagram) e importar listas, que quedan enlazadas a una carpeta para sincronizarlas.
 import { api } from './api.js';
-import { state, emit, esc, toast, upsert, refresh, canDownload, queueDownload, libraryLabel } from './store.js';
+import { state, emit, esc, toast, upsert, refresh, canDownload, queueDownload, libraryLabel, ask } from './store.js';
 
 export const NET_INFO = {
   youtube: {
@@ -220,7 +220,7 @@ export function openNet(net, { view = null } = {}) {
       return importList(l.url, l.name, b);
     }
     if (act === 'disconnect') {
-      if (!confirm(`¿Desconectar tu cuenta de ${n.name}? Lo importado se queda.`)) return;
+      if (!await ask(`¿Desconectar tu cuenta de ${n.name}? Lo importado se queda.`)) return;
       await api.socialDisconnect(net);
       state.social = await api.socialStatus();
       emit('data');

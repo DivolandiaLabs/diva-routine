@@ -2,7 +2,7 @@
 import { api } from './api.js';
 
 const ALL_SAVED = 'ALL_MEDIA_AUTO_COLLECTION'; // «Todas las publicaciones guardadas»
-import { state, emit, esc, toast, upsert, canDownload, queueDownload, libraryLabel } from './store.js';
+import { state, emit, esc, toast, upsert, canDownload, queueDownload, libraryLabel, ask } from './store.js';
 
 // ---------- tutorial para conectar la cuenta (dibujos de lo que se ve en cada paso) ----------
 
@@ -288,7 +288,7 @@ export function openInstagram({ view = state.instagram.connected ? 'collections'
     else if (act === 'import') importSelected(btn);
     else if (act === 'add-link') addByLink();
     else if (act === 'disconnect') {
-      if (!confirm('¿Desconectar tu cuenta de Instagram? Las bibliotecas importadas se quedan, pero no se podrán sincronizar hasta que vuelvas a conectar.')) return;
+      if (!await ask('¿Desconectar tu cuenta de Instagram? Las bibliotecas importadas se quedan, pero no se podrán sincronizar hasta que vuelvas a conectar.')) return;
       state.instagram = await api.igDisconnect();
       emit('data');
       dlg.close();

@@ -8,6 +8,7 @@ import {
   state, refresh, emit, esc, toast, fmtTime, parseTime, debounce, upsert,
   videoById, libraryById, libraryLabel, isTop, shelfName, exercisesOf, exerciseById, PLATFORM, CATEGORIES, youtubeId,
   jobs, queueDownload, queueAnalysis, isAnalyzing, manualExtract, canDownload, removeVideos, ui,
+  ask,
 } from './store.js';
 
 function embedUrl(src) {
@@ -596,7 +597,7 @@ export function renderVideo(root, id) {
     } else if (act === 'ex-extract') runManual(ex.id, { start: ex.start, end: ex.end });
     else if (act === 'auto') {
       const autos = exercisesOf(v.id).filter((x) => x.mode === 'auto').length;
-      if (autos && !confirm(`Se sustituirán los ${autos} ejercicios que sacó la IA (los tramos que marcaste tú se quedan). ¿Continuar?`)) return;
+      if (autos && !await ask(`Se sustituirán los ${autos} ejercicios que sacó la IA (los tramos que marcaste tú se quedan). ¿Continuar?`)) return;
       queueAnalysis([v.id], { force: true }).then(() => toast('Dibujos sacados')).catch(() => {});
       drawProgress();
     } else if (act === 'seek-kf' && video && ex) {
@@ -619,13 +620,13 @@ export function renderVideo(root, id) {
         toast(err.message, 'error');
       }
     } else if (act === 'ex-del' && ex) {
-      if (!confirm(`¿Eliminar el ejercicio «${ex.title}»? También se quitará de las rutinas.`)) return;
+      if (!await ask(`¿Eliminar el ejercicio «${ex.title}»? También se quitará de las rutinas.`)) return;
       await api.deleteExercise(ex.id);
       await refresh();
       drawExercises();
     } else if (act === 'ex-del-all') {
       const n = exercisesOf(v.id).length;
-      if (!confirm(`¿Borrar los ${n} ejercicios de este video? También saldrán de las rutinas. El video se queda.`)) return;
+      if (!await ask(`¿Borrar los ${n} ejercicios de este video? También saldrán de las rutinas. El video se queda.`)) return;
       await api.deleteExercisesOf(v.id);
       await refresh();
       activeId = null;
@@ -634,7 +635,7 @@ export function renderVideo(root, id) {
       queueDownload([v.id]);
       drawNoFile();
     } else if (act === 'del-video') {
-      if (!confirm(`¿Eliminar «${v.title}» y sus ejercicios? También se quitarán de las rutinas.`)) return;
+      if (!await ask(`¿Eliminar «${v.title}» y sus ejercicios? También se quitarán de las rutinas.`)) return;
       await removeVideos([v.id]);
       location.hash = `#/biblioteca/${v.libraryId}`;
     }

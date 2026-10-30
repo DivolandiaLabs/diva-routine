@@ -9,6 +9,7 @@ import {
   removeVideos, removeLibraries, rootLibrary, folders, topParent, isTop, shelves, shelfName, shelfOf, activeShelf, setActiveShelf, libraryLabel, needsExtraction, fmtTime,
   childFolders, folderPath, videosDeep, descendantIds, moveVideos, moveFolder,
   spaceFor, sharedFolderOf, addedByOther, who, sharedLabel,
+  ask,
 } from './store.js';
 import { openInstagram } from './instagram.js';
 import { openNet, NET_INFO } from './redes.js';
@@ -868,7 +869,7 @@ export function renderLibrary(root, libraryId) {
     const leaving = libs.filter((l) => spaceFor('folder', l.id) && !spaceFor('folder', l.id).mine);
     if (leaving.length && leaving.length === libs.length && !videos.length) {
       const names = leaving.map((l) => `«${l.name}»`).join(', ');
-      if (!confirm(`¿Salir de ${names}? Se quita de tu app (para los demás sigue igual). Lo que añadiste tú se queda en tu Biblioteca.`)) return;
+      if (!await ask(`¿Salir de ${names}? Se quita de tu app (para los demás sigue igual). Lo que añadiste tú se queda en tu Biblioteca.`)) return;
       try {
         for (const l of leaving) await api.leaveSpace(spaceFor('folder', l.id).id);
         await refresh();
@@ -880,7 +881,7 @@ export function renderLibrary(root, libraryId) {
       return;
     }
     const sharing = libs.some((l) => spaceFor('folder', l.id)?.mine);
-    if (!confirm(`¿Borrar ${parts.join(' y ')}? Sus ejercicios también saldrán de las rutinas.${sharing ? ' Las personas con quienes la compartes dejarán de verla.' : ''} No se puede deshacer.`)) return;
+    if (!await ask(`¿Borrar ${parts.join(' y ')}? Sus ejercicios también saldrán de las rutinas.${sharing ? ' Las personas con quienes la compartes dejarán de verla.' : ''} No se puede deshacer.`)) return;
     try {
       await removeVideos(videos.map((v) => v.id));
       await removeLibraries(libs.map((l) => l.id));
@@ -1007,7 +1008,7 @@ export function renderLibrary(root, libraryId) {
     if (unlink) {
       const lib = libraryById(folder.id);
       const col = lib.igCollections.find((c) => c.id === unlink.dataset.unlink);
-      if (!confirm(`¿Dejar de sincronizar «${col.name}» con esta carpeta? Lo ya importado se queda.`)) return;
+      if (!await ask(`¿Dejar de sincronizar «${col.name}» con esta carpeta? Lo ya importado se queda.`)) return;
       upsert('libraries', await api.unlinkCollection(lib.id, col.id));
       return emit('data');
     }
@@ -1037,7 +1038,7 @@ export function renderLibrary(root, libraryId) {
     if (shelfDel) {
       e.preventDefault();
       const l = libraryById(shelfDel.dataset.shelfDel);
-      if (!confirm(`¿Borrar la biblioteca «${shelfName(l)}» con todas sus carpetas, videos y fotos? No se puede deshacer.`)) return;
+      if (!await ask(`¿Borrar la biblioteca «${shelfName(l)}» con todas sus carpetas, videos y fotos? No se puede deshacer.`)) return;
       try {
         await removeLibraries([l.id]);
         setActiveShelf('');
@@ -1074,7 +1075,7 @@ export function renderLibrary(root, libraryId) {
     if (netOff) {
       const key = netOff.dataset.netOff;
       const name = key === 'instagram' ? 'Instagram' : NET_INFO[key].name;
-      if (!confirm(`¿Desconectar tu cuenta de ${name}? Lo importado se queda.`)) return;
+      if (!await ask(`¿Desconectar tu cuenta de ${name}? Lo importado se queda.`)) return;
       if (key === 'instagram') state.instagram = await api.igDisconnect();
       else {
         await api.socialDisconnect(key);
@@ -1118,7 +1119,7 @@ export function renderLibrary(root, libraryId) {
     if (netBtn) return netBtn.dataset.netLists ? openNet(netBtn.dataset.netLists, { view: 'lists' }) : openNet(netBtn.dataset.net, { view: state.social?.[netBtn.dataset.net]?.connected && NET_INFO[netBtn.dataset.net].lists ? 'lists' : null });
     const unlinkList = t.closest('[data-unlink-list]');
     if (unlinkList) {
-      if (!confirm('¿Dejar de sincronizar esta lista con la carpeta? Lo ya importado se queda.')) return;
+      if (!await ask('¿Dejar de sincronizar esta lista con la carpeta? Lo ya importado se queda.')) return;
       upsert('libraries', await api.unlinkList(folder.id, unlinkList.dataset.unlinkList));
       return emit('data');
     }
@@ -1167,7 +1168,7 @@ export function renderLibrary(root, libraryId) {
     }
     else if (act === 'ig-collections') openInstagram({ view: 'collections' });
     else if (act === 'ig-disconnect') {
-      if (!confirm('¿Desconectar tu cuenta de Instagram? Lo importado se queda, pero no se podrá sincronizar hasta que vuelvas a conectar.')) return;
+      if (!await ask('¿Desconectar tu cuenta de Instagram? Lo importado se queda, pero no se podrá sincronizar hasta que vuelvas a conectar.')) return;
       state.instagram = await api.igDisconnect();
       emit('data');
       toast('Instagram desconectado');

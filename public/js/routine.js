@@ -4,6 +4,7 @@ import { phasesSVG } from './figure.js';
 import {
   esc, toast, fmtTime, debounce, upsert, refresh, emit, routineById, exerciseById, videoById, autoOrder, ui, removeRoutine, pinRoutines, CATEGORIES,
   spaceFor, sharedLabel,
+  ask,
 } from './store.js';
 import { openShare, SHARE_TAG } from './share.js';
 
@@ -165,7 +166,7 @@ export function renderRoutine(root, id) {
     } else if (act === 'del') {
       const sp = spaceFor('routine', r.id);
       if (sp && !sp.mine) {
-        if (!confirm(`¿Salir de «${r.name}»? Se quita de tu app; para los demás sigue igual.`)) return;
+        if (!await ask(`¿Salir de «${r.name}»? Se quita de tu app; para los demás sigue igual.`)) return;
         dirty = false;
         try {
           await api.leaveSpace(sp.id);
@@ -176,7 +177,7 @@ export function renderRoutine(root, id) {
         }
         return;
       }
-      if (!confirm(`¿Eliminar la rutina «${r.name}»?${sp ? ' Las personas con quienes la compartes dejarán de verla.' : ''}`)) return;
+      if (!await ask(`¿Eliminar la rutina «${r.name}»?${sp ? ' Las personas con quienes la compartes dejarán de verla.' : ''}`)) return;
       dirty = false;
       await removeRoutine(r.id);
       location.hash = '#/rutinas';

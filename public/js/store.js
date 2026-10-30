@@ -676,3 +676,38 @@ export async function pinRoutines(ids, pinned) {
   for (const id of ids) upsert('routines', await api.updateRoutine(id, { pinned }));
   emit('data');
 }
+
+// ---------- pregunta antes de algo importante (en vez del confirm() de Windows) ----------
+
+/**
+ * Diálogo con el estilo de la app. Devuelve true si se acepta. El botón dice lo que se va a
+ * hacer («Borrar», «Desconectar»…) y va en rojo si es algo que no se deshace.
+ */
+export function ask(message) {
+  return new Promise((resolve) => {
+    const verb = /^¿?\s*(Borrar|Eliminar|Quitar|Desconectar|Salir|Cerrar|Dejar)/i.exec(message)?.[1];
+    const danger = /^(Borrar|Eliminar|Quitar)$/i.test(verb || '') || /no se puede deshacer/i.test(message);
+    const label = verb ? verb[0].toUpperCase() + verb.slice(1).toLowerCase() : 'Aceptar';
+    const dlg = document.createElement('dialog');
+    dlg.className = 'ask';
+    dlg.innerHTML = `<p>${esc(message)}</p>
+      <footer><button class="btn ghost" value="no">Cancelar</button><button class="btn ${danger ? 'danger-solid' : 'primary'}" value="yes">${esc(label)}</button></footer>`;
+    document.body.append(dlg);
+    const done = (ok) => {
+      dlg.close();
+      dlg.remove();
+      resolve(ok);
+    };
+    dlg.addEventListener('click', (e) => {
+      if (e.target === dlg) return done(false); // clic fuera
+      const b = e.target.closest('button');
+      if (b) done(b.value === 'yes');
+    });
+    dlg.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      done(false);
+    });
+    dlg.showModal();
+    dlg.querySelector(danger ? '[value="no"]' : '[value="yes"]').focus();
+  });
+}
