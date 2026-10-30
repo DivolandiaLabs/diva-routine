@@ -1318,6 +1318,24 @@ async function handleApi(req, res, parts) {
       await saveDb();
       return send(res, 201, lib);
     }
+    if (id === 'promote' && method === 'POST') {
+      // La principal no se comparte (es la base de la app): se pasa todo lo suyo a una biblioteca
+      // nueva con su nombre y su sitio, y la principal queda vacía (y oculta) por debajo.
+      const main = rootLibrary();
+      const shelf = { id: newId(), name: main.name && main.name !== 'General' ? main.name : 'Biblioteca', shelf: true, order: main.order ?? -1, createdAt: now() };
+      if (main.igCollections?.length) shelf.igCollections = main.igCollections;
+      if (main.lists?.length) shelf.lists = main.lists;
+      db.libraries.push(shelf);
+      for (const l of db.libraries) if (!l.root && !l.shelf && !l.parentId) l.parentId = shelf.id;
+      for (const v of db.videos) if (v.libraryId === main.id) v.libraryId = shelf.id;
+      for (const r of db.routines) if (r.pinnedIn?.includes(main.id) || (r.pinned && !r.pinnedIn)) r.pinnedIn = [...new Set([...(r.pinnedIn || []).filter((x) => x !== main.id), shelf.id])];
+      main.name = 'General';
+      main.order = 1e6;
+      delete main.igCollections;
+      delete main.lists;
+      await saveDb();
+      return send(res, 200, { shelf });
+    }
     if (id === 'order' && method === 'POST') {
       // { ids }: el orden de unas carpetas (las de un mismo sitio), de la primera a la última.
       const { ids } = await readJson(req);

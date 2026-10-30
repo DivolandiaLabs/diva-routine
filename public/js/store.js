@@ -73,7 +73,12 @@ export const linkedLibraries = () => state.libraries.filter((l) => l.igCollectio
 const mainLibrary = () => state.libraries.find((l) => l.root) || state.libraries[0];
 export const isTop = (l) => Boolean(l?.root || l?.shelf);
 /** Todas las bibliotecas, en el orden que les hayas dado (sin orden: la principal y luego por fecha). */
+const mainIsEmpty = () => {
+  const m = mainLibrary();
+  return !state.videos.some((v) => v.libraryId === m?.id) && !state.libraries.some((l) => !l.root && !l.shelf && !l.parentId);
+};
 export const shelves = () => [mainLibrary(), ...state.libraries.filter((l) => l.shelf && !l.root)].filter(Boolean)
+  .filter((l, _, all) => !(l.root && all.length > 1 && mainIsEmpty()))
   .map((l, i) => [l, l.order ?? (l.root ? -1 : 1e6 + i)])
   .sort((a, b) => a[1] - b[1])
   .map(([l]) => l);
@@ -87,7 +92,7 @@ export function activeShelf() {
     /* sin almacenamiento: la principal */
   }
   const l = libraryById(id);
-  return l?.shelf ? l : mainLibrary();
+  return l?.shelf ? l : shelves()[0] || mainLibrary();
 }
 export function setActiveShelf(id) {
   try {
