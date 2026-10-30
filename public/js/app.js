@@ -4,10 +4,17 @@ import { renderLibrary } from './library.js';
 import { renderVideo } from './video.js';
 import { renderRoutine } from './routine.js';
 import { renderRoutines } from './routines.js';
-import { renderSettings } from './settings.js';
+import { openSettings } from './settings.js';
 
 const host = document.getElementById('app');
 let teardown = null;
+
+// Bibliotecas o Creador de rutinas: lo que marca el menú de arriba (Ajustes no es una página,
+// es una ventana emergente, así que no cuenta aquí).
+function navSection() {
+  const [, view] = location.hash.split('/');
+  return ['rutinas', 'rutina'].includes(view) ? 'rutinas' : 'biblioteca';
+}
 
 // Cada vista recibe un contenedor nuevo (así no se acumulan listeners) y puede devolver
 // una función de limpieza que se llama al salir de ella.
@@ -17,20 +24,42 @@ function route() {
   const root = document.createElement('div');
   root.className = 'view';
   host.replaceChildren(root);
-  const [, view = 'biblioteca', id] = location.hash.split('/');
-  const section = ['rutinas', 'rutina'].includes(view) ? 'rutinas' : view === 'ajustes' ? 'ajustes' : 'biblioteca';
-  document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === section));
+  let [, view = 'biblioteca', id] = location.hash.split('/');
+  if (view === 'ajustes') {
+    // Ya no se navega aquí (los enlaces a Ajustes abren el popup sin tocar el hash); esto es
+    // solo por si el hash llega así de todos modos (recarga, enlace viejo…): se abre el popup y,
+    // detrás, la Biblioteca.
+    openSettings().addEventListener('close', () => {
+      document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === navSection()));
+    }, { once: true });
+    document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === 'ajustes'));
+    view = 'biblioteca';
+    id = undefined;
+  } else {
+    document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === navSection()));
+  }
   window.scrollTo(0, 0);
   const views = {
     video: () => renderVideo(root, id),
     rutinas: () => renderRoutines(root),
     rutina: () => renderRoutine(root, id),
-    ajustes: () => renderSettings(root),
   };
   teardown = (views[view] || (() => renderLibrary(root, id)))() || null;
 }
 
 window.addEventListener('hashchange', route);
+
+// Cualquier enlace a Ajustes (la cuenta arriba a la derecha, el aviso de sincronización, «Ir a
+// Ajustes»…) abre el popup en vez de navegar: así no se pierde lo que había detrás.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href="#/ajustes"]');
+  if (!a) return;
+  e.preventDefault();
+  document.querySelectorAll('[data-nav]').forEach((x) => x.classList.toggle('active', x.dataset.nav === 'ajustes'));
+  openSettings().addEventListener('close', () => {
+    document.querySelectorAll('[data-nav]').forEach((x) => x.classList.toggle('active', x.dataset.nav === navSection()));
+  }, { once: true });
+});
 
 // Indicador de trabajos en segundo plano (descargas y análisis).
 window.addEventListener('store', (e) => {
@@ -45,11 +74,10 @@ window.addEventListener('store', (e) => {
   try {
     await refresh();
   } catch (e) {
-    // Sin datos (p. ej. el disco de red apagado): se explica y se deja ir a Ajustes.
-    if (location.hash.startsWith('#/ajustes')) return renderSettings(host);
+    // Sin datos (p. ej. el disco de red apagado): se explica y se deja ir a Ajustes (se abre
+    // como popup encima de este mismo mensaje, con el clic de arriba).
     host.innerHTML = `<div class="empty-state"><h2>No se pueden abrir los datos</h2><p>${esc(e.message)}</p>
       <p><a class="btn" href="#/ajustes">Ir a Ajustes</a></p></div>`;
-    window.addEventListener('hashchange', () => location.hash.startsWith('#/ajustes') && renderSettings(host), { once: true });
     return;
   }
   if (state.google?.configured && !state.google.connected && !skippedLogin()) return showLogin();

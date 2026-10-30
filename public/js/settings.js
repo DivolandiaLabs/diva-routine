@@ -2,15 +2,57 @@
 // se guardan en tu Google Drive y se juntan los cambios de todos tus ordenadores). Otra forma:
 // que todos usen la misma carpeta compartida (un disco de la red, OneDrive…). Y, para compartir
 // con otras personas, configurar Firebase.
+// Se abre como una ventana emergente (como el menú de Configuración de Claude): un diálogo con
+// un menú lateral de secciones, encima de lo que estuvieras viendo.
 import { api } from './api.js';
 import { esc, toast, sleep, ask } from './store.js';
 
-export function renderSettings(root) {
-  root.innerHTML = '<div class="settings"><p class="hint">Cargando…</p></div>';
+const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICON = {
+  app: svg('<path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>'),
+  account: svg('<circle cx="12" cy="8" r="3.3"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'),
+  share: svg('<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/>'),
+  folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  about: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
+};
+
+// Marco común (título + cerrar) para cualquier estado: cargando, error o ya con datos.
+const shell = (inner) => `
+  <div class="settings">
+    <header class="lib-top set-modal-head">
+      <nav class="crumbs"><h2>Ajustes</h2></nav>
+      <button class="x" data-close-settings aria-label="Cerrar">✕</button>
+    </header>
+    ${inner}
+  </div>`;
+
+/** Abre Ajustes como ventana emergente encima de lo que se esté viendo. Devuelve el diálogo. */
+export function openSettings() {
+  document.getElementById('settingsDialog')?.remove();
+  const dlg = document.createElement('dialog');
+  dlg.id = 'settingsDialog';
+  dlg.className = 'settings-dialog';
+  document.body.appendChild(dlg);
+  const teardown = mountSettings(dlg);
+  dlg.addEventListener('close', () => {
+    teardown();
+    dlg.remove();
+  }, { once: true });
+  // Clic justo en el fondo (fuera de la tarjeta): como pulsar la X.
+  dlg.addEventListener('click', (e) => e.target === dlg && dlg.close());
+  dlg.showModal();
+  return dlg;
+}
+
+function mountSettings(root) {
+  root.innerHTML = shell('<p class="hint">Cargando…</p>');
   let info = null;
   let g = null; // estado de la cuenta de Google
   let upd = null; // versión de la app instalada y si hay otra nueva
+  let c = null; // estado de lo compartido (con las reglas de Firestore)
   let changingClient = false;
+  let changingFb = false;
+  let activeSection = null; // sección elegida en el menú lateral
   const desk = () => Boolean(upd?.desktop);
 
   // ---------- versión de la app (solo en la app instalada) ----------
@@ -93,9 +135,6 @@ export function renderSettings(root) {
 
   // ---------- compartir con otras personas (Firebase) ----------
 
-  let c = null; // estado de lo compartido (con las reglas de Firestore)
-  let changingFb = false;
-
   const drawCollab = () => {
     const box = root.querySelector('#collabCard');
     if (!box || !c || !g) return;
@@ -110,7 +149,7 @@ export function renderSettings(root) {
       const mine = c.spaces.filter((s) => s.mine).length;
       const theirs = c.spaces.length - mine;
       const p = c.progress;
-      const line = !g.connected ? 'Inicia sesión con Google (arriba) para compartir.'
+      const line = !g.connected ? 'Inicia sesión con Google (en «Tu cuenta») para compartir.'
         : c.state === 'syncing' ? `Sincronizando lo compartido…${p?.total ? ` ${esc(p.what)} ${p.done + 1} de ${p.total}` : ''}`
         : c.state === 'error' ? `<span class="err-text">No se pudo sincronizar: ${esc(c.error || '')}</span>`
         : c.last ? `Al día · ${timeOf(c.last)}` : 'Preparando…';
@@ -148,60 +187,80 @@ export function renderSettings(root) {
   };
   const poll = setInterval(() => !document.hidden && loadGoogle(), 2500);
 
-  const draw = () => {
+  // ---------- carpeta compartida (otra forma de sincronizar, sin cuenta de Google) ----------
+
+  const folderPane = () => {
     const s = info;
-    root.innerHTML = `
-      <div class="settings">
-        <header class="lib-top"><nav class="crumbs"><h2>Ajustes</h2></nav></header>
-        <section class="set-card" id="appCard" hidden></section>
-        <section class="set-card" id="googleCard"></section>
-        <section class="set-card" id="collabCard"></section>
-        <details class="set-card set-fold">
-          <summary><h3>Otra forma: una carpeta compartida</h3></summary>
-          <p>Sin cuenta de Google: todos los ordenadores usan <b>la misma carpeta de datos</b>, en un sitio compartido (un disco de la red de casa, o una carpeta de OneDrive, Google Drive o Dropbox instalados en cada ordenador).</p>
-          ${s.error ? `<p class="ig-msg error">${esc(s.error)}</p>` : ''}
-          <dl class="set-list">
-            <dt>Este ordenador</dt><dd>${esc(s.host)}</dd>
-            <dt>Carpeta de datos</dt><dd><code>${esc(s.dataDir)}</code> ${s.shared ? '<span class="badge b-auto">compartida</span>' : '<span class="badge">solo de este ordenador</span>'}</dd>
-            ${s.sizeMB != null ? `<dt>Ocupa</dt><dd>${s.sizeMB} MB</dd>` : ''}
-            ${s.shared ? `<dt>Abierta ahora en</dt><dd>${s.others.length ? esc(s.others.join(', ')) + ' y en este' : 'solo en este ordenador'}</dd>` : ''}
-          </dl>
-          <label class="field">Carpeta compartida
-            <input id="dir" value="${esc(s.configured)}" placeholder="Por ejemplo: Z:\\Diva Routine" spellcheck="false"></label>
-          ${s.suggestions.length ? `<div class="row wrap set-sugs"><span class="hint">Encontradas:</span>${s.suggestions.map((g) => `<button class="btn small" data-dir="${esc(g.dir)}" title="${esc(g.dir)}">${esc(g.label)}</button>`).join('')}</div>` : ''}
-          <div class="row wrap">
-            <button class="btn primary" data-act="use">Usar esta carpeta</button>
-            ${s.shared ? '<button class="btn ghost" data-act="local">Volver a la carpeta de este ordenador</button>' : ''}
-            <span class="hint" id="busy"></span>
-          </div>
-          <details class="set-help">
-            <summary>Cómo se hace en el otro ordenador</summary>
-            <ol>
-              <li>${desk() ? 'Instala allí la app.' : 'Copia allí la carpeta de la app (sin la carpeta <code>data</code>, que no hace falta) e instala Node.js.'}</li>
-              <li>Ábrela con <b>Iniciar Diva Routine</b> y ve a <b>Ajustes</b>.</li>
-              <li>Pon la misma carpeta compartida (si es un disco de red, con la misma letra o con su ruta <code>\\\\equipo\\carpeta</code>) y pulsa <b>Usar esta carpeta</b>: como ya tiene datos, usará esos.</li>
-              <li>Conecta allí también tu Instagram si quieres sincronizar colecciones (la sesión no se comparte).</li>
-            </ol>
-            <p>Puedes tener la app abierta en dos ordenadores, y cada uno ve los cambios del otro en unos segundos; pero si los dos cambian lo mismo a la vez, se queda el último. La app avisa arriba cuando está abierta en otro ordenador.</p>
-          </details>
-        </details>
-        <section class="set-card about" id="aboutCard">
-          <img class="about-logo" src="/logo.png" alt="">
-          <div>
-            <h3>Acerca de Diva Routine</h3>
-            <p>Rutinas de baile a partir de tus videos: los movimientos dibujados con IA, tablas para imprimir y todo sincronizado con tu cuenta de Google.</p>
-            <dl class="set-list">
-              ${upd?.current ? `<dt>Versión</dt><dd>${esc(upd.current)}</dd>` : ''}
-              <dt>Desarrollado por</dt><dd><b>Divolandia Labs</b> · Barcelona</dd>
-              <dt>Web</dt><dd><a href="https://divolandialabs.github.io/" target="_blank" rel="noopener">divolandialabs.github.io</a></dd>
-              <dt>Página de la app</dt><dd><a href="https://divolandialabs.github.io/diva-routine/" target="_blank" rel="noopener">divolandialabs.github.io/diva-routine</a></dd>
-              <dt>Código</dt><dd><a href="https://github.com/DivolandiaLabs/diva-routine" target="_blank" rel="noopener">github.com/DivolandiaLabs/diva-routine</a></dd>
-              <dt>Ayuda</dt><dd><a href="https://github.com/DivolandiaLabs/diva-routine/issues" target="_blank" rel="noopener">Cuéntanos un problema o una idea</a></dd>
-            </dl>
-            <p class="hint">© ${new Date().getFullYear()} Divolandia Labs. Todos los derechos reservados.</p>
-          </div>
-        </section>
-      </div>`;
+    return `
+      <p>Sin cuenta de Google: todos los ordenadores usan <b>la misma carpeta de datos</b>, en un sitio compartido (un disco de la red de casa, o una carpeta de OneDrive, Google Drive o Dropbox instalados en cada ordenador).</p>
+      ${s.error ? `<p class="ig-msg error">${esc(s.error)}</p>` : ''}
+      <dl class="set-list">
+        <dt>Este ordenador</dt><dd>${esc(s.host)}</dd>
+        <dt>Carpeta de datos</dt><dd><code>${esc(s.dataDir)}</code> ${s.shared ? '<span class="badge b-auto">compartida</span>' : '<span class="badge">solo de este ordenador</span>'}</dd>
+        ${s.sizeMB != null ? `<dt>Ocupa</dt><dd>${s.sizeMB} MB</dd>` : ''}
+        ${s.shared ? `<dt>Abierta ahora en</dt><dd>${s.others.length ? esc(s.others.join(', ')) + ' y en este' : 'solo en este ordenador'}</dd>` : ''}
+      </dl>
+      <label class="field">Carpeta compartida
+        <input id="dir" value="${esc(s.configured)}" placeholder="Por ejemplo: Z:\\Diva Routine" spellcheck="false"></label>
+      ${s.suggestions.length ? `<div class="row wrap set-sugs"><span class="hint">Encontradas:</span>${s.suggestions.map((x) => `<button class="btn small" data-dir="${esc(x.dir)}" title="${esc(x.dir)}">${esc(x.label)}</button>`).join('')}</div>` : ''}
+      <div class="row wrap">
+        <button class="btn primary" data-act="use">Usar esta carpeta</button>
+        ${s.shared ? '<button class="btn ghost" data-act="local">Volver a la carpeta de este ordenador</button>' : ''}
+        <span class="hint" id="busy"></span>
+      </div>
+      <details class="set-help">
+        <summary>Cómo se hace en el otro ordenador</summary>
+        <ol>
+          <li>${desk() ? 'Instala allí la app.' : 'Copia allí la carpeta de la app (sin la carpeta <code>data</code>, que no hace falta) e instala Node.js.'}</li>
+          <li>Ábrela con <b>Iniciar Diva Routine</b> y ve a <b>Ajustes</b>.</li>
+          <li>Pon la misma carpeta compartida (si es un disco de red, con la misma letra o con su ruta <code>\\\\equipo\\carpeta</code>) y pulsa <b>Usar esta carpeta</b>: como ya tiene datos, usará esos.</li>
+          <li>Conecta allí también tu Instagram si quieres sincronizar colecciones (la sesión no se comparte).</li>
+        </ol>
+        <p>Puedes tener la app abierta en dos ordenadores, y cada uno ve los cambios del otro en unos segundos; pero si los dos cambian lo mismo a la vez, se queda el último. La app avisa arriba cuando está abierta en otro ordenador.</p>
+      </details>`;
+  };
+
+  const aboutPane = () => `
+    <section class="set-card about" id="aboutCard">
+      <img class="about-logo" src="/logo.png" alt="">
+      <div>
+        <h3>Acerca de Diva Routine</h3>
+        <p>Rutinas de baile a partir de tus videos: los movimientos dibujados con IA, tablas para imprimir y todo sincronizado con tu cuenta de Google.</p>
+        <dl class="set-list">
+          ${upd?.current ? `<dt>Versión</dt><dd>${esc(upd.current)}</dd>` : ''}
+          <dt>Desarrollado por</dt><dd><b>Divolandia Labs</b> · Barcelona</dd>
+          <dt>Web</dt><dd><a href="https://divolandialabs.github.io/" target="_blank" rel="noopener">divolandialabs.github.io</a></dd>
+          <dt>Página de la app</dt><dd><a href="https://divolandialabs.github.io/diva-routine/" target="_blank" rel="noopener">divolandialabs.github.io/diva-routine</a></dd>
+          <dt>Código</dt><dd><a href="https://github.com/DivolandiaLabs/diva-routine" target="_blank" rel="noopener">github.com/DivolandiaLabs/diva-routine</a></dd>
+          <dt>Ayuda</dt><dd><a href="https://github.com/DivolandiaLabs/diva-routine/issues" target="_blank" rel="noopener">Cuéntanos un problema o una idea</a></dd>
+        </dl>
+        <p class="hint">© ${new Date().getFullYear()} Divolandia Labs. Todos los derechos reservados.</p>
+      </div>
+    </section>`;
+
+  // ---------- menú lateral (como el de Configuración) ----------
+
+  // «App» solo si es la app instalada (ahí es donde hay actualizaciones que buscar).
+  const sections = () => [
+    desk() && { id: 'app', label: 'App', icon: ICON.app, html: '<section class="set-card" id="appCard"></section>' },
+    { id: 'account', label: 'Tu cuenta', icon: ICON.account, html: '<section class="set-card" id="googleCard"></section>' },
+    { id: 'share', label: 'Compartir', icon: ICON.share, html: '<section class="set-card" id="collabCard"></section>' },
+    { id: 'folder', label: 'Carpeta compartida', icon: ICON.folder, html: folderPane() },
+    { id: 'about', label: 'Acerca de', icon: ICON.about, html: aboutPane() },
+  ].filter(Boolean);
+
+  const draw = () => {
+    const list = sections();
+    if (!activeSection || !list.some((x) => x.id === activeSection)) activeSection = list[0].id;
+    root.innerHTML = shell(`
+      <div class="settings-shell">
+        <nav class="settings-nav">
+          ${list.map((x) => `<button class="set-nav-btn${x.id === activeSection ? ' active' : ''}" data-section="${x.id}">${x.icon}<span>${esc(x.label)}</span></button>`).join('')}
+        </nav>
+        <div class="settings-panes">
+          ${list.map((x) => `<section class="set-pane${x.id === activeSection ? ' active' : ''}" data-pane="${x.id}">${x.html}</section>`).join('')}
+        </div>
+      </div>`);
   };
 
   const load = async () => {
@@ -212,10 +271,20 @@ export function renderSettings(root) {
       drawGoogle();
       drawCollab();
     } catch (e) {
-      root.innerHTML = `<div class="empty-state"><h2>No se pudieron leer los ajustes</h2><p>${esc(e.message)}</p></div>`;
+      root.innerHTML = shell(`<div class="empty-state"><h2>No se pudieron leer los ajustes</h2><p>${esc(e.message)}</p></div>`);
     }
   };
   load();
+
+  // Cerrar (la X) y cambiar de sección en el menú lateral.
+  root.addEventListener('click', (e) => {
+    if (e.target.closest('[data-close-settings]')) return root.close();
+    const nav = e.target.closest('[data-section]');
+    if (!nav) return;
+    activeSection = nav.dataset.section;
+    root.querySelectorAll('.set-nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.section === activeSection));
+    root.querySelectorAll('.set-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === activeSection));
+  });
 
   root.addEventListener('change', async (e) => {
     if (e.target.id !== 'gFile' || !e.target.files[0]) return;
@@ -239,7 +308,7 @@ export function renderSettings(root) {
       } else if (act === 'logout') {
         if (!await ask('¿Cerrar la sesión de Google en este ordenador? Tus datos se quedan aquí y en tu Drive; solo deja de sincronizar hasta que vuelvas a iniciar sesión.')) return;
         g = await api.googleLogout();
-        try { localStorage.removeItem("jr-login-skip"); } catch {}
+        try { localStorage.removeItem('jr-login-skip'); } catch { /* sin almacenamiento */ }
         return location.reload();
       } else if (act === 'sync') {
         g = { ...g, state: 'syncing' };

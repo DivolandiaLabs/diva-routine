@@ -807,3 +807,31 @@ body.tile-moving, body.tile-moving * { cursor: grabbing !important; user-select:
 .about-logo { width: 84px; height: 84px; flex: none; border-radius: 20px; }
 .set-card.about a { color: var(--accent); }
 @media (max-width: 640px) { .set-card.about { flex-direction: column; } }
+
+/* ---------- Ajustes: ventana emergente, con menú lateral (como el popup de Configuración) ---------- */
+.settings-dialog {
+  width: min(880px, calc(100vw - 32px)); height: min(640px, calc(100vh - 48px));
+  padding: 0; border: 1px solid var(--line); border-radius: 18px;
+  background: var(--surface); color: var(--text); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.settings-dialog::backdrop { background: rgba(20, 14, 10, 0.5); backdrop-filter: blur(2px); }
+.settings-dialog .settings { display: flex; flex-direction: column; flex: 1; min-height: 0; max-width: none; gap: 0; }
+.set-modal-head { flex: none; margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.set-modal-head .x { border: 0; background: none; cursor: pointer; font-size: 1.1rem; color: var(--muted); padding: 4px 8px; border-radius: 6px; }
+.set-modal-head .x:hover { background: var(--surface-2); color: var(--text); }
+.settings-shell { display: flex; flex: 1; min-height: 0; }
+.settings-nav { width: 210px; flex: none; padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); overflow-y: auto; }
+.set-nav-btn { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-radius: 10px; background: none; color: var(--muted); font: inherit; font-size: 0.92rem; font-weight: 500; text-align: left; cursor: pointer; }
+.set-nav-btn svg { width: 17px; height: 17px; flex: none; }
+.set-nav-btn:hover { background: var(--surface-2); color: var(--text); }
+.set-nav-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.settings-panes { flex: 1; min-width: 0; padding: 20px 24px; overflow-y: auto; }
+.set-pane { display: none; }
+.set-pane.active { display: grid; gap: 16px; align-content: start; }
+@media (max-width: 640px) {
+  .settings-dialog { height: min(82vh, 640px); }
+  .settings-shell { flex-direction: column; }
+  .settings-nav { width: auto; flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); }
+  .set-nav-btn span { display: none; }
+}
