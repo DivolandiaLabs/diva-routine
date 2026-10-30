@@ -1423,6 +1423,14 @@ async function handleApi(req, res, parts) {
 
   // --- videos ---
   if (resource === 'videos') {
+    if (id === 'order' && method === 'POST') {
+      // { ids }: el orden de unos videos o fotos (los de una misma carpeta), del primero al último.
+      const { ids } = await readJson(req);
+      const vids = (Array.isArray(ids) ? ids : []).map((x) => find('videos', x, 'Video'));
+      vids.forEach((v, i) => (v.order = i));
+      await saveDb();
+      return send(res, 200, { videos: vids.map(forClient) });
+    }
     if (!id && method === 'POST') {
       // Alta por links: { urls, libraryId }. Las listas de YouTube se expanden en sus videos.
       const { urls = [], libraryId } = await readJson(req);

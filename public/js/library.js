@@ -865,6 +865,17 @@ export function renderLibrary(root, libraryId) {
   // (reordenar); en el centro, se mete dentro.
   let reorderAt = null;
   const reorderOf = (e) => {
+    // Un video o una foto sobre otro de la misma carpeta: va delante o detrás (según la mitad).
+    if (moving && moving.videos.length === 1 && !moving.folders.length && !filters.q.trim()) {
+      const t = e.target.closest?.('.tile[data-kind="video"]');
+      const dragged = videoById(moving.videos[0]);
+      const over = t && videoById(t.dataset.id);
+      if (!over || over.id === dragged?.id || over.libraryId !== dragged?.libraryId) return null;
+      const r = t.getBoundingClientRect();
+      const rows = ['list', 'details'].includes(view);
+      const f = rows ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+      return { el: t, id: over.id, after: f > 0.5, video: true };
+    }
     if (!moving || moving.videos.length || moving.folders.length !== 1) return null;
     const t = e.target.closest?.('.tile-folder');
     const dragged = libraryById(moving.folders[0]);
@@ -905,6 +916,22 @@ export function renderLibrary(root, libraryId) {
   };
   root.addEventListener('dragend', endMove);
   root.addEventListener('drop', async (e) => {
+    if (reorderAt?.video && moving) {
+      e.preventDefault();
+      const { id, after } = reorderAt;
+      const dragged = moving.videos[0];
+      endMove();
+      const ids = videosOf(videoById(dragged).libraryId).map((v) => v.id).filter((x) => x !== dragged);
+      ids.splice(ids.indexOf(id) + (after ? 1 : 0), 0, dragged);
+      try {
+        const r = await api.orderVideos(ids);
+        r.videos.forEach((v) => upsert('videos', v));
+        emit('data');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
     if (reorderAt && moving) {
       e.preventDefault();
       const { id, after } = reorderAt;

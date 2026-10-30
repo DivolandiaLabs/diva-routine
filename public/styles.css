@@ -755,3 +755,8 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 .shelf-share svg { width: 17px; height: 17px; }
 .shelf-share:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .shelf-pill.shared::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%; background: #3fbf7f; vertical-align: middle; }
+/* reordenar videos y fotos: barra de color en el lado donde caerá */
+.tile[data-kind="video"].drop-before { box-shadow: inset 5px 0 0 var(--accent), var(--shadow); }
+.tile[data-kind="video"].drop-after { box-shadow: inset -5px 0 0 var(--accent), var(--shadow); }
+.view-list .tile[data-kind="video"].drop-before, .view-details .tile[data-kind="video"].drop-before { box-shadow: inset 0 4px 0 var(--accent); }
+.view-list .tile[data-kind="video"].drop-after, .view-details .tile[data-kind="video"].drop-after { box-shadow: inset 0 -4px 0 var(--accent); }

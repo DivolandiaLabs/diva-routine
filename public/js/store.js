@@ -258,7 +258,9 @@ export const videoById = byIdIn('videos');
 export const exerciseById = byIdIn('exercises');
 export const routineById = byIdIn('routines');
 
-export const videosOf = (libraryId) => state.videos.filter((v) => !libraryId || v.libraryId === libraryId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+// En el orden que les hayas dado arrastrándolos; los demás, por fecha (al final).
+export const videosOf = (libraryId) => state.videos.filter((v) => !libraryId || v.libraryId === libraryId)
+  .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || a.createdAt.localeCompare(b.createdAt));
 export const exercisesOf = (videoId) => state.exercises.filter((e) => e.videoId === videoId).sort((a, b) => a.start - b.start);
 
 export function upsert(list, item) {
