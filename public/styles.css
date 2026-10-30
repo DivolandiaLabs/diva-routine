@@ -133,6 +133,12 @@ input:focus, textarea:focus, select:focus, .btn:focus-visible, .tl:focus-visible
   display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; min-height: 44px; flex-wrap: wrap;
 }
 .lib-top input[type="search"] { width: 240px; margin-left: auto; }
+/* el grupo de herramientas (contador, acceso a lo anclado, orden, vistas) se mueve en bloque */
+.lib-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lib-tools .count {
+  display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--surface-2);
+}
 .crumbs { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 220px; }
 .crumbs h2 { font-size: 1.4rem; }
 .crumbs a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: 1.05rem; white-space: nowrap; }
@@ -622,7 +628,7 @@ body.login-mode .topbar { display: none; }
 .net-off { margin-top: 4px; }
 
 /* ---------- vistas de la Biblioteca (como el explorador de archivos) ---------- */
-.views { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; }
+.views { display: flex; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; }
 .view-btn { width: 30px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
 .view-btn svg { width: 16px; height: 16px; }
 .view-btn:hover { color: var(--text, inherit); background: var(--accent-soft); }
@@ -711,16 +717,17 @@ a.shelf-tab:hover { color: inherit; background: var(--accent-soft); }
 
 /* ---------- barra de bibliotecas (más limpia) ---------- */
 .shelf-bar {
-  display: flex; align-items: center; gap: 4px; margin: -4px 0 14px; padding: 4px; overflow-x: auto; scrollbar-width: thin;
+  display: flex; align-items: center; gap: 6px; margin: -4px 0 14px; padding: 6px; overflow-x: auto; scrollbar-width: thin;
   border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--surface) 70%, transparent);
+  box-shadow: var(--shadow);
 }
 .shelf-pill {
   flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  padding: 7px 14px; border-radius: 10px; text-decoration: none; font-size: 0.9rem; font-weight: 500; color: var(--muted);
+  padding: 8px 16px; border-radius: 10px; text-decoration: none; font-size: 0.9rem; font-weight: 500; color: var(--muted);
   transition: background 0.15s, color 0.15s;
 }
 .shelf-pill:hover { background: var(--accent-soft); color: inherit; }
-.shelf-pill.on { background: var(--accent); color: #fff; font-weight: 600; }
+.shelf-pill.on { background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 45%, transparent); }
 .shelf-bar .shelf-add { flex: none; width: 32px; height: 32px; margin-left: 2px; font-size: 1.15rem; }
 .drag-active .shelf-pill:not(.on) { outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -2px; }
 .shelf-pill.drop-over { outline: 2px solid var(--accent) !important; background: var(--accent-soft); color: var(--accent); }

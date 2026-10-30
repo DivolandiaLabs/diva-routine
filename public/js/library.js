@@ -196,11 +196,13 @@ export function renderLibrary(root, libraryId) {
                <button class="icon-btn" data-act="rename" title="Cambiar el nombre de la carpeta" aria-label="Cambiar el nombre">${PENCIL}</button>`
             : shelfTitle()}</nav>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
-          <span class="count" id="count"></span>
-          <button class="pin-jump" id="pinJump" data-pin-jump hidden title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
-          <label class="sorter" title="Ordenar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>
-            <select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-          <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
+          <div class="lib-tools">
+            <span class="count" id="count"></span>
+            <button class="pin-jump" id="pinJump" data-pin-jump hidden title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
+            <label class="sorter" title="Ordenar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>
+              <select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+            <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
+          </div>
         </header>
         <div class="ig-callout" id="igTuto" hidden></div>
         <div class="ig-linked share-bar" id="shareBar" hidden></div>
