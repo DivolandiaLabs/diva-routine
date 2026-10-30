@@ -784,3 +784,6 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 .sorter select { border: 0; background: transparent; color: inherit; font-weight: 500; padding: 4px 6px; cursor: pointer; width: auto; }
 .sorter select option { background: var(--surface); color: var(--text, #eee); }
 .sorter:hover { color: var(--accent); border-color: var(--accent); }
+/* el selector de orden: un solo marco (el de fuera) al pasar el ratón o al elegir */
+.sorter select, .sorter select:hover, .sorter select:focus, .sorter select:focus-visible { border: 0 !important; outline: none !important; box-shadow: none !important; background: transparent !important; }
+.sorter:focus-within { color: var(--accent); border-color: var(--accent); }
