@@ -891,16 +891,42 @@ export function renderLibrary(root, libraryId) {
 
     const ren = t.closest('[data-rename-lib]');
     if (ren) {
+      // El nombre se escribe ahí mismo, sobre el recuadro (la app de escritorio no tiene prompt()).
+      e.preventDefault();
       const lib = libraryById(ren.dataset.renameLib);
-      const name = prompt('Nuevo nombre de la carpeta:', lib?.name || '')?.trim();
-      if (!lib || !name || name === lib.name) return;
-      try {
-        upsert('libraries', await api.renameLibrary(lib.id, name));
-        emit('data');
-        toast(`Carpeta renombrada a «${name}»`);
-      } catch (err) {
-        toast(err.message, 'error');
-      }
+      const tile = ren.closest('.tile');
+      if (!lib || tile.querySelector('.tile-rename')) return;
+      const input = document.createElement('input');
+      input.className = 'tile-rename';
+      input.value = lib.name;
+      input.maxLength = 60;
+      input.setAttribute('aria-label', 'Nuevo nombre de la carpeta');
+      tile.classList.add('renaming');
+      tile.append(input);
+      input.focus();
+      input.select();
+      let done = false;
+      const finish = async (save) => {
+        if (done) return;
+        done = true;
+        const name = input.value.trim();
+        input.remove();
+        tile.classList.remove('renaming');
+        if (!save || !name || name === lib.name) return;
+        try {
+          upsert('libraries', await api.renameLibrary(lib.id, name));
+          emit('data');
+          toast(`Carpeta renombrada a «${name}»`);
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      };
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') finish(true);
+        else if (ev.key === 'Escape') finish(false);
+      });
+      input.addEventListener('blur', () => finish(true));
+      input.addEventListener('click', (ev) => ev.stopPropagation());
       return;
     }
     if (t.closest('[data-act="rename"]')) {

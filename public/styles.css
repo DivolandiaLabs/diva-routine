@@ -678,3 +678,10 @@ body.login-mode .topbar { display: none; }
 .view-s .kind-mark { top: 6px; right: 6px; width: 20px; height: 20px; }
 .view-s .kind-mark svg { width: 11px; height: 11px; }
 .meta .badge.b-kind { background: color-mix(in srgb, var(--k) 18%, transparent); color: var(--k); border-color: transparent; }
+/* cambiar el nombre de una carpeta ahí mismo */
+.tile-rename {
+  position: absolute; z-index: 4; left: 8px; right: 8px; bottom: 10px; padding: 8px 10px; border-radius: 10px;
+  border: 2px solid var(--accent); background: var(--surface); font-weight: 600; font-size: 0.95rem; box-shadow: var(--shadow);
+}
+.view-list .tile-rename, .view-details .tile-rename { left: 92px; bottom: auto; top: 50%; transform: translateY(-50%); }
+.tile.renaming .card-rename, .tile.renaming .card-del { visibility: hidden; }
