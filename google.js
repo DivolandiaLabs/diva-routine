@@ -49,10 +49,17 @@ export function initGoogle({ clientFile, firebaseFile, localDir }) {
   } catch {
     firebase = null;
   }
-  try {
-    tokens = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
-  } catch {
-    tokens = null;
+  // Si el archivo está ocupado (la app anterior cerrándose al actualizar), se reintenta un poco
+  // antes de dar la sesión por cerrada.
+  for (let i = 1; i <= 20; i++) {
+    try {
+      tokens = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
+      break;
+    } catch (e) {
+      tokens = null;
+      if (e.code === 'ENOENT') break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
   }
 }
 

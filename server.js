@@ -97,12 +97,28 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 
 let db = dataError ? { libraries: [], videos: [], exercises: [], routines: [], deleted: {} } : loadDb();
 
+// Lee un JSON reintentando unos segundos si está ocupado (al actualizar, la app anterior puede
+// tenerlo abierto todavía). Si no existe devuelve null; si no se puede leer, lanza el error.
+function readJsonSync(file, tries = 20) {
+  for (let i = 1; ; i++) {
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;
+      if (i >= tries) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
+  }
+}
+
 function loadDb() {
   let parsed = {};
   try {
-    parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  } catch {
-    /* primera vez */
+    parsed = readJsonSync(DB_FILE) || {}; // sin archivo: primera vez
+  } catch (e) {
+    // Nunca se arranca vacío encima de unos datos que no se han podido leer: así no se pisan.
+    dataError = `No pude leer tus datos (${e.code || e.message}). Cierra y vuelve a abrir la app; tus datos siguen en «${DB_FILE}».`;
+    console.error(dataError);
   }
   const data = {
     libraries: parsed.libraries || [],
