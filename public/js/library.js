@@ -284,7 +284,6 @@ export function renderLibrary(root, libraryId) {
     // Redes sociales: sin conectar, un solo botón «Conectar cuenta» (abre el tutorial); conectada,
     // un desplegable con lo que tienes guardado en esa red para marcarlo e importarlo.
     instagram: () => {
-      const linked = linkedLibraries();
       const card = (key) => {
         const ig = key === 'instagram';
         const n = ig ? { name: 'Instagram', color: '#e1306c' } : NET_INFO[key];
@@ -304,10 +303,7 @@ export function renderLibrary(root, libraryId) {
           <h4>${ig ? ICON.instagram : NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${body}</section>`;
       };
       return `${panelHead('Redes sociales')}
-        ${['instagram', 'youtube', 'tiktok', 'facebook'].map(card).join('')}
-        ${linked.length ? `<h4 class="sh-sub">Carpetas enlazadas</h4>
-          <ul class="panel-list">${linked.map((l) => `<li><a href="#/biblioteca/${l.id}">${esc(libraryLabel(l))}</a> <span class="hint">← ${[...(l.igCollections || []).map((c) => c.name), ...(l.lists || []).map((x) => x.name)].map((x) => `«${esc(x)}»`).join(', ')}</span></li>`).join('')}</ul>
-          <div class="row"><button class="btn small" data-act="ig-sync-all">Sincronizar todo</button></div>` : ''}`;
+        ${['instagram', 'youtube', 'tiktok', 'facebook'].map(card).join('')}`;
     },
 
     draw: () => {
