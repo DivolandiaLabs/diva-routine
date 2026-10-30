@@ -1171,7 +1171,7 @@ async function handleApi(req, res, parts) {
       if (!info.entries.length) throw fail(400, 'Esa lista está vacía (o es privada y falta conectar la cuenta).');
       let lib = db.libraries.find((l) => l.id === body.libraryId) || db.libraries.find((l) => l.lists?.some((x) => x.url === url));
       const isNew = !lib;
-      if (isNew) lib = { id: newId(), name: String(body.name || info.title).slice(0, 60), createdAt: now() };
+      if (isNew) lib = { id: newId(), name: String(body.name || info.title).slice(0, 60), parentId: validParent(body.parentId, null), createdAt: now() };
       const created = await importList(lib, { url, name: String(body.name || info.title).slice(0, 80), net: social.netOf(url), seen: [] });
       if (isNew) db.libraries.push(lib);
       db.videos.push(...created);
@@ -1217,7 +1217,7 @@ async function handleApi(req, res, parts) {
       let lib = db.libraries.find((l) => l.id === body.libraryId)
         || db.libraries.find((l) => l.igCollections?.some((x) => x.id === col.id));
       const isNew = !lib;
-      if (isNew) lib = { id: newId(), name: col.name, createdAt: now() };
+      if (isNew) lib = { id: newId(), name: col.name, parentId: validParent(body.parentId, null), createdAt: now() };
       const created = await importIgCollection(lib, col);
       if (isNew) db.libraries.push(lib);
       db.videos.push(...created);
@@ -1230,8 +1230,11 @@ async function handleApi(req, res, parts) {
   if (resource === 'libraries') {
     if (!id && method === 'POST') {
       // parentId: carpeta dentro de otra (sin él, va en la Biblioteca).
-      const { name, parentId } = await readJson(req);
-      const lib = { id: newId(), name: String(name || 'Nueva carpeta').slice(0, 60), parentId: validParent(parentId, null), createdAt: now() };
+      const { name, parentId, shelf } = await readJson(req);
+      // shelf: una biblioteca más (con sus propias carpetas), no una carpeta.
+      const lib = shelf
+        ? { id: newId(), name: String(name || 'Nueva biblioteca').slice(0, 60), shelf: true, createdAt: now() }
+        : { id: newId(), name: String(name || 'Nueva carpeta').slice(0, 60), parentId: validParent(parentId, null), createdAt: now() };
       db.libraries.push(lib);
       await saveDb();
       return send(res, 201, lib);

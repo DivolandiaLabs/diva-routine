@@ -679,3 +679,20 @@ body.login-mode .topbar { display: none; }
 .saved-progress { display: grid; gap: 6px; margin: 6px 0 10px; }
 .saved-progress .bar { height: 8px; border-radius: 999px; background: var(--accent-soft); overflow: hidden; }
 .saved-progress .bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #fff)); transition: width 0.25s linear; }
+
+/* ---------- varias bibliotecas: pestañas arriba ---------- */
+.shelf-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.shelf-tab { position: relative; margin: 0; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 12px; text-decoration: none; color: var(--muted); font-weight: 600; font-size: 1rem; border: 1px solid transparent; }
+a.shelf-tab:hover { color: inherit; background: var(--accent-soft); }
+.shelf-tab.on { font-size: 1.55rem; color: inherit; padding: 2px 8px; }
+.shelf-name { cursor: text; }
+.shelf-name:hover { text-decoration: underline dotted color-mix(in srgb, var(--accent) 70%, transparent); text-underline-offset: 4px; }
+.shelf-del { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 0.85rem; opacity: 0; padding: 2px 4px; border-radius: 6px; }
+.shelf-tab.on:hover .shelf-del { opacity: 1; }
+.shelf-del:hover { color: #fff; background: #b3261e; }
+.shelf-add { width: 34px; height: 34px; border-radius: 50%; border: 1px dashed color-mix(in srgb, var(--accent) 60%, var(--line)); background: none; color: var(--accent); font-size: 1.3rem; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.shelf-add:hover { background: var(--accent-soft); border-style: solid; }
+.shelf-tab .tile-rename { left: 0; right: auto; bottom: auto; top: 50%; transform: translateY(-50%); min-width: 240px; font-size: 1.1rem; }
+.shelf-tab.renaming .shelf-name { visibility: hidden; }
+.drag-active .shelf-tab:not(.on) { outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+.shelf-tab.drop-over { outline: 3px solid var(--accent) !important; color: var(--accent); }

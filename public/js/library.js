@@ -6,7 +6,7 @@ import {
   state, refresh, emit, esc, toast, upsert, libraryById, videoById, exerciseById, videosOf, exercisesOf, videoThumb, PLATFORM,
   jobs, queueDownload, isAnalyzing, canDownload, syncInstagram, linkedLibraries,
   selection, toggleSelected, selectedIndex, selectedVideos, extractSelection, ui, exerciseFigure, pinRoutines,
-  removeVideos, removeLibraries, rootLibrary, folders, libraryLabel, needsExtraction, fmtTime,
+  removeVideos, removeLibraries, rootLibrary, folders, topParent, isTop, shelves, shelfName, shelfOf, activeShelf, setActiveShelf, libraryLabel, needsExtraction, fmtTime,
   childFolders, folderPath, videosDeep, descendantIds, moveVideos, moveFolder,
   spaceFor, sharedFolderOf, addedByOther, who, sharedLabel,
 } from './store.js';
@@ -51,9 +51,21 @@ const NET_ICON = {
 
 export function renderLibrary(root, libraryId) {
   const lib0 = libraryById(libraryId);
-  const folder = lib0 && !lib0.root ? lib0 : null; // null = la raíz
+  const folder = lib0 && !isTop(lib0) ? lib0 : null; // null = lo de arriba de la biblioteca
+  // La biblioteca abierta: la que se pidió, o la de la carpeta que se abre.
+  if (libraryId && lib0) {
+    const top = isTop(lib0) ? lib0 : shelfOf(lib0.id);
+    setActiveShelf(top.root ? '' : top.id);
+  }
+  const shelf = activeShelf();
   const here = () => folder?.id || rootLibrary().id;
   const filters = { q: '' };
+  // Pestañas con las bibliotecas: la abierta se ve grande; su nombre se cambia pulsándolo; + crea otra.
+  // Se puede soltar en una pestaña lo que arrastras para llevarlo a esa biblioteca.
+  const shelfTabs = () => `<div class="shelf-tabs">${shelves().map((l) => l.id === shelf.id
+    ? `<h2 class="shelf-tab on" data-drop-lib="${l.id}"><span class="shelf-name" data-shelf-name="${l.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(l))}</span>${l.root ? '' : `<button class="shelf-del" data-shelf-del="${l.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(l))}">✕</button>`}</h2>`
+    : `<a class="shelf-tab" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" title="Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)">${esc(shelfName(l))}</a>`).join('')}
+    <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button></div>`;
   // Vistas como en el explorador de archivos (se recuerda la elegida). Ctrl + rueda cambia de una a otra.
   const VIEWS = [
     ['xl', 'Iconos muy grandes'], ['l', 'Iconos grandes'], ['m', 'Iconos medianos'],
@@ -78,11 +90,11 @@ export function renderLibrary(root, libraryId) {
       <section class="lib-main" id="main">
         <header class="lib-top">
           <nav class="crumbs">${folder
-            ? `<a href="#/biblioteca" data-drop-lib="" title="Suelta aquí para sacar a la Biblioteca">Biblioteca</a><span>›</span>
+            ? `<a href="#/biblioteca/${shelf.id}" data-drop-lib="${shelf.id}" title="Suelta aquí para sacar a «${esc(shelfName(shelf))}»">${esc(shelfName(shelf))}</a><span>›</span>
                ${folderPath(folder).slice(0, -1).map((a) => `<a href="#/biblioteca/${a.id}" data-drop-lib="${a.id}" title="Suelta aquí para mover a «${esc(a.name)}»">${esc(a.name)}</a><span>›</span>`).join('')}
                <input id="libName" class="title-input" value="${esc(folder.name)}" aria-label="Nombre de la carpeta" title="Haz clic para cambiar el nombre">
                <button class="icon-btn" data-act="rename" title="Cambiar el nombre de la carpeta" aria-label="Cambiar el nombre">${PENCIL}</button>`
-            : '<h2>Biblioteca</h2>'}</nav>
+            : shelfTabs()}</nav>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
           <span class="count" id="count"></span>
           <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
@@ -136,7 +148,7 @@ export function renderLibrary(root, libraryId) {
   // ---------- paneles ----------
 
   // Todas las carpetas, con su ruta (jszz › giros) y en orden de árbol.
-  const libraryOptions = (selected) => [rootLibrary(), ...folders().sort((a, b) => libraryLabel(a).localeCompare(libraryLabel(b)))]
+  const libraryOptions = (selected) => [...shelves(), ...folders().sort((a, b) => libraryLabel(a).localeCompare(libraryLabel(b)))]
     .map((l) => `<option value="${l.id}" ${l.id === selected ? 'selected' : ''}>${esc(libraryLabel(l))}</option>`).join('');
 
   const panelHead = (title) => `<header><h3>${title}</h3><button class="x" data-close aria-label="Cerrar">✕</button></header>`;
@@ -227,7 +239,7 @@ export function renderLibrary(root, libraryId) {
     try {
       for (const [i, it] of items.entries()) {
         $(`#savedBusy-${key}`).textContent = `Importando «${it.name}» (${i + 1} de ${items.length})…`;
-        const r = key === 'instagram' ? await api.igImport({ id: it.id, name: it.name }, null) : await api.importList(it.id, it.name);
+        const r = key === 'instagram' ? await api.igImport({ id: it.id, name: it.name }, null, topParent()) : await api.importList(it.id, it.name, null, topParent());
         upsert('libraries', r.library);
         r.created.forEach((v) => upsert('videos', v));
         created.push(...r.created);
@@ -252,7 +264,7 @@ export function renderLibrary(root, libraryId) {
         made.forEach((v) => upsert('videos', v));
         await finishImport(made, new Set());
       } else {
-        const r = await api.importList(url, null);
+        const r = await api.importList(url, null, null, topParent());
         upsert('libraries', r.library);
         r.created.forEach((v) => upsert('videos', v));
         await finishImport(r.created, new Set([r.library.id]));
@@ -672,9 +684,10 @@ export function renderLibrary(root, libraryId) {
   // ¿Se puede soltar ahí? No en sí misma ni en sus subcarpetas, ni donde ya está todo.
   const canDropOn = (target) => {
     if (!moving) return false;
-    const tid = target || null;
+    // La biblioteca principal como destino: sus carpetas de arriba no tienen parentId.
+    const tid = target && !libraryById(target)?.root ? target : null;
     if (moving.folders.some((f) => f === tid || descendantIds(f).includes(tid))) return false;
-    const vidsHere = moving.videos.every((id) => videoById(id)?.libraryId === (tid || rootLibrary().id));
+    const vidsHere = moving.videos.every((id) => videoById(id)?.libraryId === (target || rootLibrary().id));
     const libsHere = moving.folders.every((id) => (libraryById(id)?.parentId || null) === tid);
     return !(vidsHere && libsHere);
   };
@@ -858,7 +871,7 @@ export function renderLibrary(root, libraryId) {
   async function createFolder() {
     const name = $('#newLib').value.trim();
     if (!name) return $('#newLib').focus();
-    const lib = upsert('libraries', await api.createLibrary(name, folder?.id || null));
+    const lib = upsert('libraries', await api.createLibrary(name, folder?.id || topParent()));
     $('#newLib').value = '';
     panel = null;
     emit('data');
@@ -873,7 +886,7 @@ export function renderLibrary(root, libraryId) {
   // El nombre se escribe ahí mismo, sobre el recuadro (Enter guarda, Esc cancela). La app de
   // escritorio no tiene prompt().
   const RENAME = {
-    library: { get: (id) => libraryById(id)?.name, save: async (id, name) => upsert('libraries', await api.renameLibrary(id, name)), max: 60 },
+    library: { get: (id) => (isTop(libraryById(id)) ? shelfName(libraryById(id)) : libraryById(id)?.name), save: async (id, name) => upsert('libraries', await api.renameLibrary(id, name)), max: 60 },
     video: { get: (id) => videoById(id)?.title, save: async (id, name) => upsert('videos', await api.updateVideo(id, { title: name, titleLocked: true })), max: 120 },
     routine: { get: (id) => state.routines.find((r) => r.id === id)?.name, save: async (id, name) => upsert('routines', await api.updateRoutine(id, { name })), max: 80 },
   };
@@ -901,6 +914,8 @@ export function renderLibrary(root, libraryId) {
       try {
         await how.save(id, name);
         emit('data');
+        // La pestaña de la biblioteca no se repinta con los datos: se cambia aquí.
+        root.querySelectorAll(`[data-shelf-name="${id}"]`).forEach((el) => (el.textContent = name));
       } catch (err) {
         toast(err.message, 'error');
       }
@@ -942,6 +957,41 @@ export function renderLibrary(root, libraryId) {
       return emit('data');
     }
 
+    // Bibliotecas: crear otra, cambiar el nombre de la abierta o borrarla.
+    if (t.closest('[data-shelf-add]')) {
+      e.preventDefault();
+      try {
+        const l = upsert('libraries', await api.createShelf('Nueva biblioteca'));
+        // Al día ya: así la app no se repinta sola a los pocos segundos mientras escribes el nombre.
+        await refresh();
+        setActiveShelf(l.id);
+        // Recién creada: en cuanto se abre, el nombre se escribe directamente.
+        window.addEventListener('hashchange', () => setTimeout(() => document.querySelector(`[data-shelf-name="${l.id}"]`)?.click(), 150), { once: true });
+        location.hash = `#/biblioteca/${l.id}`;
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
+    const shelfNameEl = t.closest('[data-shelf-name]');
+    if (shelfNameEl) {
+      e.preventDefault();
+      return renameInline(shelfNameEl.closest('.shelf-tab'), 'library', shelfNameEl.dataset.shelfName);
+    }
+    const shelfDel = t.closest('[data-shelf-del]');
+    if (shelfDel) {
+      e.preventDefault();
+      const l = libraryById(shelfDel.dataset.shelfDel);
+      if (!confirm(`¿Borrar la biblioteca «${shelfName(l)}» con todas sus carpetas, videos y fotos? No se puede deshacer.`)) return;
+      try {
+        await removeLibraries([l.id]);
+        setActiveShelf('');
+        location.hash = '#/biblioteca';
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
     // Cambiar el nombre: pulsando el nombre de cualquier recuadro.
     const nameEl = t.closest('[data-name]');
     if (nameEl) {

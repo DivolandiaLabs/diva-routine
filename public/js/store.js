@@ -24,7 +24,7 @@ export const canDownload = (v) => Boolean(v.source.drive) || (Boolean(v.source.u
 export const spaceFor = (type, id) => (state.collab?.spaces || []).find((s) => s.type === type && s.rootId === id) || null;
 /** La carpeta compartida en la que está (o que es) esta carpeta. */
 export function sharedFolderOf(libraryId) {
-  for (let l = libraryById(libraryId), n = 0; l && !l.root && n < 100; l = libraryById(l.parentId), n++) {
+  for (let l = libraryById(libraryId), n = 0; l && !isTop(l) && n < 100; l = libraryById(l.parentId), n++) {
     const sp = spaceFor('folder', l.id);
     if (sp) return sp;
   }
@@ -67,18 +67,55 @@ export async function syncInstagram(libs) {
 
 export const linkedLibraries = () => state.libraries.filter((l) => l.igCollections?.length || l.lists?.length);
 
-/** La biblioteca raíz (lo suelto) y las carpetas (las demás). */
-export const rootLibrary = () => state.libraries.find((l) => l.root) || state.libraries[0];
-export const folders = () => state.libraries.filter((l) => !l.root);
-/** Carpetas que hay justo dentro de otra (parentId null = las de la Biblioteca). */
+// ---------- bibliotecas y carpetas ----------
+// La biblioteca principal es la raíz de siempre (root): sus carpetas de arriba no tienen parentId.
+// Las demás bibliotecas (shelf) guardan dentro lo suyo: sus carpetas de arriba tienen parentId = su id.
+const mainLibrary = () => state.libraries.find((l) => l.root) || state.libraries[0];
+export const isTop = (l) => Boolean(l?.root || l?.shelf);
+/** Todas las bibliotecas, la principal primero y luego en el orden en que se crearon. */
+export const shelves = () => [mainLibrary(), ...state.libraries.filter((l) => l.shelf && !l.root).sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || String(a.createdAt).localeCompare(String(b.createdAt)))].filter(Boolean);
+export const shelfName = (l) => (l?.root && (!l.name || l.name === 'General') ? 'Biblioteca' : l?.name || 'Biblioteca');
+/** La biblioteca abierta (se recuerda en este ordenador). */
+export function activeShelf() {
+  let id = null;
+  try {
+    id = localStorage.getItem('jr-shelf');
+  } catch {
+    /* sin almacenamiento: la principal */
+  }
+  const l = libraryById(id);
+  return l?.shelf ? l : mainLibrary();
+}
+export function setActiveShelf(id) {
+  try {
+    localStorage.setItem('jr-shelf', id || '');
+  } catch {
+    /* solo esta vez */
+  }
+}
+/** La biblioteca de un elemento: subiendo por sus carpetas hasta la de arriba. */
+export function shelfOf(libraryId) {
+  let l = libraryById(libraryId);
+  for (let n = 0; l && !isTop(l) && n < 100; n++) l = libraryById(l.parentId) || mainLibrary();
+  return l || mainLibrary();
+}
+/** Donde va lo suelto de la biblioteca abierta (sin carpeta). */
+export const rootLibrary = () => activeShelf();
+/** parentId de las carpetas de arriba de la biblioteca abierta. */
+export const topParent = () => (activeShelf().root ? null : activeShelf().id);
+export const folders = () => state.libraries.filter((l) => !isTop(l));
+/** Carpetas que hay justo dentro de otra (null = las de arriba de la biblioteca abierta). */
 // En el orden que les hayas dado arrastrándolas (las que no tienen, al final, como se crearon).
-export const childFolders = (parentId) => folders()
-  .filter((l) => (l.parentId || null) === (parentId || null))
-  .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+export const childFolders = (parentId) => {
+  const key = parentId || topParent();
+  return folders()
+    .filter((l) => (l.parentId || null) === key)
+    .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+};
 /** La carpeta y las de encima, de fuera hacia dentro: [jszz, giros]. */
 export function folderPath(lib) {
   const out = [];
-  for (let l = lib; l && !l.root && !out.includes(l); l = libraryById(l.parentId)) out.unshift(l);
+  for (let l = lib; l && !isTop(l) && !out.includes(l); l = libraryById(l.parentId)) out.unshift(l);
   return out;
 }
 /** Ids de las subcarpetas de una carpeta, a cualquier profundidad. */
@@ -99,7 +136,11 @@ export const videosDeep = (id) => {
   const ids = new Set([id, ...descendantIds(id)]);
   return state.videos.filter((v) => ids.has(v.libraryId)).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 };
-export const libraryLabel = (l) => (l?.root ? 'Biblioteca (sin carpeta)' : folderPath(l).map((x) => x.name).join(' › ') || l?.name || '');
+export const libraryLabel = (l) => {
+  if (isTop(l)) return `${shelfName(l)} (sin carpeta)`;
+  const path = folderPath(l).map((x) => x.name).join(' › ') || l?.name || '';
+  return shelves().length > 1 ? `${shelfName(shelfOf(l?.id))} › ${path}` : path;
+};
 
 // ---------- borrar ----------
 

@@ -6,7 +6,7 @@ import { detectPose, captureFrames } from './pose.js';
 import { labelPose } from './analysis.js';
 import {
   state, refresh, emit, esc, toast, fmtTime, parseTime, debounce, upsert,
-  videoById, libraryById, libraryLabel, exercisesOf, exerciseById, PLATFORM, CATEGORIES, youtubeId,
+  videoById, libraryById, libraryLabel, isTop, shelfName, exercisesOf, exerciseById, PLATFORM, CATEGORIES, youtubeId,
   jobs, queueDownload, queueAnalysis, isAnalyzing, manualExtract, canDownload, removeVideos, ui,
 } from './store.js';
 
@@ -42,7 +42,7 @@ export function renderVideo(root, id) {
         <button class="btn primary small" data-act="back-draw">← Volver a sacar dibujos</button>
       </div>` : ''}
     <div class="vhead">
-      <a href="#/biblioteca/${v.libraryId}" class="back">← ${esc(lib && !lib.root ? lib.name : 'Biblioteca')}</a>
+      <a href="#/biblioteca/${v.libraryId}" class="back">← ${esc(lib && !isTop(lib) ? lib.name : shelfName(lib))}</a>
       <input id="vtitle" class="title-input" value="${esc(v.title)}" aria-label="Nombre del video">
       <select id="vlib" title="Mover a otra carpeta">${state.libraries.map((l) => `<option value="${l.id}" ${l.id === v.libraryId ? 'selected' : ''}>${esc(libraryLabel(l))}</option>`).join('')}</select>
       <button class="btn small ghost danger" data-act="del-video">Eliminar</button>
@@ -661,7 +661,7 @@ export function renderVideo(root, id) {
       const to = libraryById(e.target.value);
       toast(`Movido a «${libraryLabel(to)}»`);
       root.querySelector('.back').href = `#/biblioteca/${to.id}`;
-      root.querySelector('.back').textContent = `← ${to.root ? 'Biblioteca' : to.name}`;
+      root.querySelector('.back').textContent = `← ${isTop(to) ? shelfName(to) : to.name}`;
     } else if (e.target.id === 'attach' && e.target.files[0]) {
       toast('Subiendo…');
       try {

@@ -39,6 +39,7 @@ export const api = {
   leaveSpace: (sid) => request('POST', `/api/collab/${sid}/leave`),
 
   createLibrary: (name, parentId = null) => request('POST', '/api/libraries', { name, parentId }),
+  createShelf: (name) => request('POST', '/api/libraries', { name, shelf: true }),
   renameLibrary: (id, name) => request('PUT', `/api/libraries/${id}`, { name }),
   updateLibrary: (id, data) => request('PUT', `/api/libraries/${id}`, data),
   orderLibraries: (ids) => request('POST', '/api/libraries/order', { ids }),
@@ -50,14 +51,14 @@ export const api = {
   socialConnect: (net, cookies) => request('POST', `/api/social/${net}`, { cookies }),
   socialDisconnect: (net) => request('DELETE', `/api/social/${net}`),
   youtubeLists: () => request('GET', '/api/social/youtube/lists'),
-  importList: (url, name, libraryId) => request('POST', '/api/social/lists/import', { url, name, libraryId }),
+  importList: (url, name, libraryId, parentId) => request('POST', '/api/social/lists/import', { url, name, libraryId, parentId }),
   unlinkList: (libraryId, url) => request('POST', '/api/social/lists/unlink', { libraryId, url }),
 
   igStatus: () => request('GET', '/api/instagram'),
   igConnect: (cookies) => request('POST', '/api/instagram', { cookies }),
   igDisconnect: () => request('DELETE', '/api/instagram'),
   igCollections: () => request('GET', '/api/instagram/collections'),
-  igImport: (collection, libraryId) => request('POST', '/api/instagram/collections/import', { ...collection, libraryId }),
+  igImport: (collection, libraryId, parentId) => request('POST', '/api/instagram/collections/import', { ...collection, libraryId, parentId }),
 
   addLinks: (urls, libraryId) => request('POST', '/api/videos', { urls, libraryId }),
   upload: (file, libraryId) => request('POST', '/api/videos/upload', file, fileHeaders(file, libraryId)),
