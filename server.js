@@ -100,13 +100,22 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 let db = dataError ? { libraries: [], videos: [], exercises: [], routines: [], deleted: {} } : loadDb();
 
 // Lee un JSON reintentando unos segundos si está ocupado (al actualizar, la app anterior puede
-// tenerlo abierto todavía). Si no existe devuelve null; si no se puede leer, lanza el error.
-function readJsonSync(file, tries = 20) {
+// tenerlo abierto todavía, o el antivirus estar escaneando el archivo recién instalado/escrito).
+// Si de verdad no existe (primera vez) devuelve null; si no se puede leer, lanza el error.
+function readJsonSync(file, tries = 60) {
   for (let i = 1; ; i++) {
     try {
       return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
-      if (e.code === 'ENOENT') return null;
+      if (e.code === 'ENOENT') {
+        // Casi siempre es la primera vez (no hay archivo aún), pero justo al actualizar el
+        // archivo puede desaparecer un instante por el propio sistema (otro ordenador
+        // guardando con su «escribe y renombra», el antivirus, etc.). Unos reintentos cortos
+        // cubren ese hueco sin notarse en un arranque de verdad-primera-vez.
+        if (i >= 5) return null;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+        continue;
+      }
       if (i >= tries) throw e;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
     }
