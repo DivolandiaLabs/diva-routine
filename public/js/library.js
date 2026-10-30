@@ -693,29 +693,79 @@ export function renderLibrary(root, libraryId) {
   const MOVE_TYPE = 'application/x-jazz-mover';
   let moving = null; // { videos: [ids], folders: [ids] }
 
-  // Reordenar las bibliotecas: se mantiene pulsada una pestaña (medio segundo) y se arrastra.
-  // Con un clic normal solo se abre; así no se mueven sin querer.
-  let shelfDrag = null;
-  let holdTimer = null;
-  const releasePills = () => {
-    clearTimeout(holdTimer);
-    root.querySelectorAll('.shelf-pill.grab-ready').forEach((p) => {
-      p.classList.remove('grab-ready');
-      p.draggable = false;
-    });
+  // Reordenar las bibliotecas: se mantiene pulsada una pestaña (medio segundo), se mueve y se suelta.
+  // Con un clic normal solo se abre. Va con el puntero (no con arrastrar y soltar del navegador,
+  // que decide al pulsar si algo se puede arrastrar y no deja esperar a mantenerla pulsada).
+  let shelfDrag = null; // { id, pill, ghost } mientras se mueve una pestaña
+  let hold = null;
+  const clearPillMarks = () => root.querySelectorAll('.pill-before, .pill-after').forEach((x) => x.classList.remove('pill-before', 'pill-after'));
+  const pillAt = (x, y) => {
+    const el = document.elementFromPoint(x, y)?.closest?.('[data-shelf-pill]');
+    if (!el || el.dataset.shelfPill === shelfDrag?.id) return null;
+    const r = el.getBoundingClientRect();
+    return { pill: el, after: x > r.left + r.width / 2 };
+  };
+  const endShelfDrag = async (drop) => {
+    clearTimeout(hold?.timer);
+    hold = null;
+    if (!shelfDrag) return;
+    const { id, pill, ghost } = shelfDrag;
+    const at = drop && pillAt(drop.clientX, drop.clientY);
+    shelfDrag = null;
+    ghost.remove();
+    pill.classList.remove('grab-ready', 'dragging');
+    pill.dataset.held = '1'; // el clic que llega al soltar no abre ni renombra
+    clearPillMarks();
+    document.body.classList.remove('pill-moving');
+    if (!at) return;
+    const ids = shelves().map((l) => l.id).filter((x) => x !== id);
+    ids.splice(ids.indexOf(at.pill.dataset.shelfPill) + (at.after ? 1 : 0), 0, id);
+    try {
+      const r = await api.orderLibraries(ids);
+      r.libraries.forEach((l) => upsert('libraries', l));
+      const bar = root.querySelector('.shelf-bar');
+      if (bar) bar.outerHTML = shelfBar();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   };
   root.addEventListener('pointerdown', (e) => {
     const pill = e.target.closest?.('[data-shelf-pill]');
-    if (!pill || e.button !== 0) return;
-    holdTimer = setTimeout(() => {
-      pill.draggable = true;
-      pill.classList.add('grab-ready');
-      pill.dataset.held = '1';
-    }, 450);
+    if (!pill || e.button !== 0 || e.target.closest('.tile-rename')) return;
+    hold = {
+      x: e.clientX,
+      y: e.clientY,
+      timer: setTimeout(() => {
+        // Ya se puede mover: la pestaña se levanta y una copia sigue al puntero.
+        const r = pill.getBoundingClientRect();
+        const ghost = pill.cloneNode(true);
+        ghost.className = 'shelf-pill on pill-ghost';
+        Object.assign(ghost.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px' });
+        document.body.append(ghost);
+        pill.classList.add('grab-ready', 'dragging');
+        document.body.classList.add('pill-moving');
+        shelfDrag = { id: pill.dataset.shelfPill, pill, ghost, dx: hold.x - r.left };
+      }, 450),
+    };
   });
-  root.addEventListener('pointerup', () => !shelfDrag && releasePills());
-  root.addEventListener('pointerleave', () => !shelfDrag && releasePills());
-  // Tras mantenerla pulsada, soltar sin arrastrar no la abre.
+  const onPillMove = (e) => {
+    if (hold && !shelfDrag && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 6) {
+      clearTimeout(hold.timer); // se movió antes de tiempo: no es mantener pulsado
+      hold = null;
+    }
+    if (!shelfDrag) return;
+    e.preventDefault();
+    shelfDrag.ghost.style.left = e.clientX - shelfDrag.dx + 'px';
+    clearPillMarks();
+    const at = pillAt(e.clientX, e.clientY);
+    if (at) at.pill.classList.add(at.after ? 'pill-after' : 'pill-before');
+  };
+  const onPillUp = (e) => endShelfDrag(e);
+  const onPillEsc = (e) => e.key === 'Escape' && endShelfDrag(null);
+  document.addEventListener('pointermove', onPillMove);
+  document.addEventListener('pointerup', onPillUp);
+  document.addEventListener('keydown', onPillEsc);
+  // Tras mantenerla pulsada, soltar no la abre.
   root.addEventListener('click', (e) => {
     const pill = e.target.closest?.('[data-shelf-pill]');
     if (pill?.dataset.held) {
@@ -731,57 +781,10 @@ export function renderLibrary(root, libraryId) {
       renameInline(pill, 'library', pill.dataset.shelfPill);
     }
   }, true);
+  // Las pestañas no se arrastran como links (eso las importaría como un video).
   root.addEventListener('dragstart', (e) => {
-    const pill = e.target.closest?.('[data-shelf-pill]');
-    if (!pill) return;
-    if (!pill.classList.contains('grab-ready')) return e.preventDefault();
-    shelfDrag = pill.dataset.shelfPill;
-    e.dataTransfer.clearData(); // sin su link: así no se toma por algo que importar
-    e.dataTransfer.setData('application/x-diva-shelf', shelfDrag);
-    e.dataTransfer.effectAllowed = 'move';
-    pill.classList.add('dragging');
-    e.stopImmediatePropagation();
-  });
-  const pillSide = (e) => {
-    const pill = e.target.closest?.('[data-shelf-pill]');
-    if (!shelfDrag || !pill || pill.dataset.shelfPill === shelfDrag) return null;
-    const r = pill.getBoundingClientRect();
-    return { pill, after: e.clientX > r.left + r.width / 2 };
-  };
-  root.addEventListener('dragover', (e) => {
-    if (!shelfDrag) return;
-    e.stopImmediatePropagation();
-    root.querySelectorAll('.pill-before, .pill-after').forEach((x) => x.classList.remove('pill-before', 'pill-after'));
-    const at = pillSide(e);
-    if (!at) return;
-    e.preventDefault();
-    at.pill.classList.add(at.after ? 'pill-after' : 'pill-before');
+    if (e.target.closest?.('[data-shelf-pill]')) e.preventDefault();
   }, true);
-  root.addEventListener('drop', async (e) => {
-    if (!shelfDrag) return;
-    e.stopImmediatePropagation();
-    e.preventDefault();
-    const at = pillSide(e);
-    const dragged = shelfDrag;
-    shelfDrag = null;
-    root.querySelectorAll('.pill-before, .pill-after, .shelf-pill.dragging').forEach((x) => x.classList.remove('pill-before', 'pill-after', 'dragging'));
-    if (!at) return;
-    const ids = shelves().map((l) => l.id).filter((x) => x !== dragged);
-    ids.splice(ids.indexOf(at.pill.dataset.shelfPill) + (at.after ? 1 : 0), 0, dragged);
-    try {
-      const r = await api.orderLibraries(ids);
-      r.libraries.forEach((l) => upsert('libraries', l));
-      const bar = root.querySelector('.shelf-bar');
-      if (bar) bar.outerHTML = shelfBar();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  }, true);
-  root.addEventListener('dragend', () => {
-    shelfDrag = null;
-    releasePills();
-    root.querySelectorAll('.pill-before, .pill-after, .shelf-pill.dragging').forEach((x) => x.classList.remove('pill-before', 'pill-after', 'dragging'));
-  });
 
   root.addEventListener('dragstart', (e) => {
     const tile = e.target.closest?.('.tile[data-kind="video"], .tile[data-kind="library"]');
@@ -1360,6 +1363,10 @@ export function renderLibrary(root, libraryId) {
   return () => {
     window.removeEventListener('store', onStore);
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointermove', onPillMove);
+    document.removeEventListener('pointerup', onPillUp);
+    document.removeEventListener('keydown', onPillEsc);
+    endShelfDrag(null);
     clearTimeout(gridTimer);
     pasted.forEach((p) => URL.revokeObjectURL(p.url));
   };
