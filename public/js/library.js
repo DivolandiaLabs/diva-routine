@@ -99,6 +99,31 @@ export function renderLibrary(root, libraryId) {
     ['xl', 'Iconos muy grandes'], ['l', 'Iconos grandes'], ['m', 'Iconos medianos'],
     ['s', 'Iconos pequeños'], ['list', 'Lista'], ['details', 'Detalles'],
   ];
+  // Cómo se ordena lo de cada carpeta: el orden propio (arrastrando) o por fecha, nombre o tipo.
+  const SORTS = [
+    ['custom', 'Mi orden'], ['new', 'Más recientes'], ['old', 'Más antiguos'],
+    ['az', 'Nombre A–Z'], ['za', 'Nombre Z–A'], ['type', 'Tipo'],
+  ];
+  let sortBy = 'custom';
+  try {
+    const saved = localStorage.getItem('jr-sort');
+    if (SORTS.some(([k]) => k === saved)) sortBy = saved;
+  } catch {
+    /* sin almacenamiento: el orden propio */
+  }
+  const nameOf = (x) => (x.name ?? x.title ?? '').toLocaleLowerCase('es');
+  const sortList = (list) => {
+    const by = {
+      new: (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
+      old: (a, b) => String(a.createdAt).localeCompare(String(b.createdAt)),
+      az: (a, b) => nameOf(a).localeCompare(nameOf(b), 'es', { numeric: true }),
+      za: (a, b) => nameOf(b).localeCompare(nameOf(a), 'es', { numeric: true }),
+      // Videos, luego fotos, luego lo que aún no se ha descargado; dentro, por nombre.
+      type: (a, b) => typeRank(a) - typeRank(b) || nameOf(a).localeCompare(nameOf(b), 'es', { numeric: true }),
+    }[sortBy];
+    return by ? [...list].sort(by) : list;
+  };
+  const typeRank = (x) => (x.source ? (x.source.mediaType === 'video' ? 0 : x.source.mediaType === 'image' ? 1 : 2) : 0);
   let view = 'm';
   try {
     const saved = localStorage.getItem('jr-view');
@@ -126,6 +151,8 @@ export function renderLibrary(root, libraryId) {
             : shelfTitle()}</nav>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
           <span class="count" id="count"></span>
+          <label class="sorter" title="Ordenar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>
+            <select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
           <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
         </header>
         <div class="ig-callout" id="igTuto" hidden></div>
@@ -447,7 +474,7 @@ export function renderLibrary(root, libraryId) {
     if (q) return { libs: folders().filter((l) => l.name.toLowerCase().includes(q)), vids: state.videos.filter((v) => videoText(v).includes(q)) };
     // Lo fijado con el pin va primero (en su orden); luego, lo demás.
     const pinFirst = (list) => [...list.filter((x) => x.pinnedTop), ...list.filter((x) => !x.pinnedTop)];
-    return { libs: pinFirst(childFolders(folder?.id || null)), vids: pinFirst(videosOf(here())) };
+    return { libs: pinFirst(sortList(childFolders(folder?.id || null))), vids: pinFirst(sortList(videosOf(here()))) };
   };
 
   const statusHtml = (v) => {
@@ -873,6 +900,7 @@ export function renderLibrary(root, libraryId) {
   // (reordenar); en el centro, se mete dentro.
   let reorderAt = null;
   const reorderOf = (e) => {
+    if (sortBy !== 'custom') return null;
     // Un video o una foto sobre otro de la misma carpeta: va delante o detrás (según la mitad).
     if (moving && moving.videos.length === 1 && !moving.folders.length && !filters.q.trim()) {
       const t = e.target.closest?.('.tile[data-kind="video"]');
@@ -1068,6 +1096,16 @@ export function renderLibrary(root, libraryId) {
       const btn = root.querySelector(`[data-saved-import="${key}"]`);
       btn.disabled = !n;
       btn.textContent = n ? `Importar (${n})` : 'Importar';
+    }
+    else if (t.id === 'sortBy') {
+      sortBy = t.value;
+      try {
+        localStorage.setItem('jr-sort', sortBy);
+      } catch {
+        /* solo esta vez */
+      }
+      drawGrid();
+      if (sortBy !== 'custom') toast('Para colocar las cosas a mano arrastrándolas, elige «Mi orden».');
     }
     else if (t.id === 'toRoutine') syncRoutineTarget();
     else if (t.id === 'libName') {

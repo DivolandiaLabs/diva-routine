@@ -778,3 +778,9 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 .pin-break { grid-column: 1 / -1; height: 1px; margin: 2px 0; background: linear-gradient(90deg, transparent, var(--line) 15%, var(--line) 85%, transparent); }
 .view-list .card-pin, .view-details .card-pin { top: 50%; transform: translateY(-50%); right: 44px; }
 .view-list .card-pin.on, .view-details .card-pin.on { transform: translateY(-50%) rotate(-20deg); }
+/* organizador: ordenar por fecha, nombre o tipo */
+.sorter { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 10px; height: 36px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
+.sorter svg { width: 16px; height: 16px; flex: none; }
+.sorter select { border: 0; background: transparent; color: inherit; font-weight: 500; padding: 4px 6px; cursor: pointer; width: auto; }
+.sorter select option { background: var(--surface); color: var(--text, #eee); }
+.sorter:hover { color: var(--accent); border-color: var(--accent); }
