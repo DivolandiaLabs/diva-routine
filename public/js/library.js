@@ -16,6 +16,13 @@ import { openShare, SHARE_TAG } from './share.js';
 
 const URL_RE = /^https?:\/\//i;
 
+// Marca de cada tipo en la esquina del recuadro: video, foto o rutina.
+const KIND = {
+  video: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>',
+  image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6" fill="currentColor"/><path d="m4 17 5-5 4 4 3-3 4 4"/></svg>',
+  routine: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor"/></svg>',
+};
+
 const sq = (x, y, s) => `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="1.5"/>`;
 const VIEW_ICON = {
   xl: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${sq(4, 4, 16)}</svg>`,
@@ -369,8 +376,8 @@ export function renderLibrary(root, libraryId) {
     if (isAnalyzing(v.id)) return '<span class="badge b-busy">En cola</span>';
     if (jobs.downloading === v.id) return '<span class="badge b-busy">Descargando…</span>';
     if (jobs.downloads.includes(v.id)) return '<span class="badge b-busy">Por descargar</span>';
-    if (v.source.mediaType === 'image') return '<span class="badge">Foto</span>';
-    if (v.source.file) return '<span class="badge">Video</span>';
+    if (v.source.mediaType === 'image') return '<span class="badge b-kind">Foto</span>';
+    if (v.source.file) return '<span class="badge b-kind">Video</span>';
     if (v.source.fetchError) return `<span class="badge b-error" title="${esc(v.source.fetchError)}">No se pudo descargar</span>`;
     return '<span class="badge b-link">Sin descargar</span>';
   };
@@ -404,7 +411,8 @@ export function renderLibrary(root, libraryId) {
   };
 
   const videoTile = (v, showFolder) => `
-    <article class="tile" data-kind="video" data-id="${v.id}" draggable="true">
+    <article class="tile tile-${v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="true">
+      <span class="kind-mark" aria-hidden="true">${v.source.mediaType === 'image' ? KIND.image : KIND.video}</span>
       <label class="sel" title="Seleccionar para una rutina"><input type="checkbox" data-sel-video="${v.id}"><b class="order"></b></label>
       ${lockedIn(v, v.libraryId) ? '' : `<button class="card-del" data-del-video="${v.id}" title="Borrar" aria-label="Borrar ${esc(v.title)}">✕</button>`}
       <a class="tile-thumb" href="#/video/${v.id}">${videoThumb(v)}</a>
@@ -421,6 +429,7 @@ export function renderLibrary(root, libraryId) {
     return `
       <article class="tile tile-routine" data-kind="routine" data-id="${r.id}">
         <button class="card-del" data-unpin="${r.id}" title="Quitar de la página principal (la rutina no se borra)" aria-label="Quitar ${esc(r.name)} de la página principal">✕</button>
+        <span class="kind-mark" aria-hidden="true">${KIND.routine}</span>
         <a class="tile-thumb" href="#/rutina/${r.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((e) => `<span>${exerciseFigure(e, 120)}</span>`).join('')}</span>`
           : '<span class="folder-empty">Vacía</span>'}</a>
