@@ -800,3 +800,5 @@ body.tile-moving, body.tile-moving * { cursor: grabbing !important; user-select:
 }
 .tile-ghost .card-del, .tile-ghost .card-pin, .tile-ghost .sel { display: none; }
 .ghost-count { position: absolute; top: -10px; right: -10px; min-width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 1.1rem; box-shadow: 0 2px 8px rgb(0 0 0 / 0.4); }
+/* rutinas en la cuadrícula: a la misma altura que las carpetas (que llevan su pestaña arriba) */
+.tiles:not(.view-list):not(.view-details) .tile-routine { margin-top: 9px; }

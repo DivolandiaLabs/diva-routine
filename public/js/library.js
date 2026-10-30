@@ -9,7 +9,7 @@ import {
   removeVideos, removeLibraries, rootLibrary, folders, topParent, isTop, shelves, shelfName, shelfOf, activeShelf, setActiveShelf, libraryLabel, needsExtraction, fmtTime,
   childFolders, folderPath, videosDeep, descendantIds, moveVideos, moveFolder,
   spaceFor, sharedFolderOf, addedByOther, who, sharedLabel,
-  ask, isPinnedIn,
+  ask, isPinnedIn, routineById,
 } from './store.js';
 import { openInstagram } from './instagram.js';
 import { openNet, NET_INFO } from './redes.js';
@@ -480,10 +480,17 @@ export function renderLibrary(root, libraryId) {
   // los hayas colocado (lo que nunca se colocó: las carpetas antes y luego por fecha).
   const arranged = () => {
     const { libs, vids } = visible();
-    const items = [...libs.map((x) => ({ kind: 'library', x })), ...vids.map((x) => ({ kind: 'video', x }))];
+    const rts = !folder && !filters.q.trim() ? sortList(state.routines.filter((r) => isPinnedIn(r, shelf.id))) : [];
+    const items = [
+      ...libs.map((x) => ({ kind: 'library', x })),
+      ...rts.map((x) => ({ kind: 'routine', x })),
+      ...vids.map((x) => ({ kind: 'video', x })),
+    ];
     if (sortBy !== 'custom' || filters.q.trim()) return items;
-    const rank = (it) => it.x.order ?? Infinity;
-    return items.sort((a, b) => rank(a) - rank(b) || (a.kind === b.kind ? String(a.x.createdAt).localeCompare(String(b.x.createdAt)) : a.kind === 'library' ? -1 : 1));
+    const KIND_RANK = { library: 0, routine: 1, video: 2 };
+    // Una rutina recién anclada (aún sin colocar) sale al principio; lo demás sin colocar, al final.
+    const rank = (it) => (it.kind === 'routine' ? it.x.orderIn?.[shelf.id] ?? -1 : it.x.order ?? Infinity);
+    return items.sort((a, b) => rank(a) - rank(b) || KIND_RANK[a.kind] - KIND_RANK[b.kind] || String(a.x.createdAt).localeCompare(String(b.x.createdAt)));
   };
 
   const statusHtml = (v) => {
@@ -569,14 +576,18 @@ export function renderLibrary(root, libraryId) {
     setView(view);
     const { libs, vids } = visible();
     const searching = Boolean(filters.q.trim());
-    const pinned = !folder && !searching ? state.routines.filter((r) => isPinnedIn(r, shelf.id)) : [];
-    $('#count').textContent = `${libs.length ? `${libs.length} carpeta${libs.length === 1 ? '' : 's'} · ` : ''}${vids.length} elemento${vids.length === 1 ? '' : 's'}`;
     const items = arranged();
-    const tile = (it) => (it.kind === 'library' ? folderTile(it.x) : videoTile(it.x, searching));
-    $('#grid').innerHTML = pinned.length || items.length
-      // Primera línea: rutinas ancladas y lo fijado con el pin; debajo, lo demás.
-      ? pinned.map(routineTile).join('') + items.filter((it) => it.x.pinnedTop).map(tile).join('')
-        + (pinned.length || items.some((it) => it.x.pinnedTop) ? '<div class="pin-break" aria-hidden="true"></div>' : '')
+    const nRt = items.filter((it) => it.kind === 'routine').length;
+    $('#count').textContent = [
+      libs.length && `${libs.length} carpeta${libs.length === 1 ? '' : 's'}`,
+      nRt && `${nRt} rutina${nRt === 1 ? '' : 's'}`,
+      `${vids.length} elemento${vids.length === 1 ? '' : 's'}`,
+    ].filter(Boolean).join(' · ');
+    const tile = (it) => (it.kind === 'library' ? folderTile(it.x) : it.kind === 'routine' ? routineTile(it.x) : videoTile(it.x, searching));
+    $('#grid').innerHTML = items.length
+      // Primera línea: lo fijado con el pin; debajo, lo demás (rutinas incluidas, en su sitio).
+      ? items.filter((it) => it.x.pinnedTop).map(tile).join('')
+        + (items.some((it) => it.x.pinnedTop) ? '<div class="pin-break" aria-hidden="true"></div>' : '')
         + items.filter((it) => !it.x.pinnedTop).map(tile).join('')
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
           <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`;
@@ -870,6 +881,7 @@ export function renderLibrary(root, libraryId) {
     // La biblioteca principal como destino: sus carpetas de arriba no tienen parentId.
     const tid = target && !libraryById(target)?.root ? target : null;
     if (moving.folders.some((f) => f === tid || descendantIds(f).includes(tid))) return false;
+    if (moving.routines.length) return false; // una rutina solo se recoloca
     const vidsHere = moving.videos.every((id) => videoById(id)?.libraryId === (target || rootLibrary().id));
     const libsHere = moving.folders.every((id) => (libraryById(id)?.parentId || null) === tid);
     return !(vidsHere && libsHere);
@@ -903,7 +915,7 @@ export function renderLibrary(root, libraryId) {
   let reorderAt = null;
   // Sobre otro elemento de aquí: delante o detrás. Sobre una carpeta, solo en sus bordes (en el
   // centro se mete dentro); sobre un video o una foto, según la mitad.
-  const ITEM = '#grid .tile[data-kind="video"], #grid .tile-folder';
+  const ITEM = '#grid .tile[data-kind="video"], #grid .tile-folder, #grid .tile-routine';
   // En un hueco entre recuadros (o tras el último): el más cercano en esa fila.
   const nearestTile = (x, y) => {
     let best = null;
@@ -917,8 +929,8 @@ export function renderLibrary(root, libraryId) {
     return best?.t || null;
   };
   const reorderOf = (under, x, y) => {
-    if (!moving || moving.videos.length + moving.folders.length !== 1 || filters.q.trim()) return null;
-    const draggedId = moving.videos[0] || moving.folders[0];
+    if (!moving || moving.videos.length + moving.folders.length + moving.routines.length !== 1 || filters.q.trim()) return null;
+    const draggedId = moving.videos[0] || moving.folders[0] || moving.routines[0];
     let t = under?.closest?.(ITEM);
     const inGap = !t && under?.closest?.('#grid') && !under.closest('[data-drop-lib]');
     if (inGap) {
@@ -955,28 +967,30 @@ export function renderLibrary(root, libraryId) {
   const startMove = (tile, e) => {
     const kind = tile.dataset.kind;
     const inSel = selectedIndex(kind, tile.dataset.id) >= 0 && selection.length > 1;
-    moving = inSel
-      ? { videos: selection.filter((x) => x.type === 'video').map((x) => x.id), folders: selection.filter((x) => x.type === 'library').map((x) => x.id) }
-      : { videos: kind === 'video' ? [tile.dataset.id] : [], folders: kind === 'library' ? [tile.dataset.id] : [] };
+    moving = kind === 'routine'
+      ? { videos: [], folders: [], routines: [tile.dataset.id] }
+      : inSel
+        ? { videos: selection.filter((x) => x.type === 'video').map((x) => x.id), folders: selection.filter((x) => x.type === 'library').map((x) => x.id), routines: [] }
+        : { videos: kind === 'video' ? [tile.dataset.id] : [], folders: kind === 'library' ? [tile.dataset.id] : [], routines: [] };
     window.getSelection()?.removeAllRanges();
     const r = tile.getBoundingClientRect();
     ghost = tile.cloneNode(true);
     ghost.classList.add('tile-ghost');
     ghost.classList.remove('on', 'dragging');
-    const n = moving.videos.length + moving.folders.length;
+    const n = moving.videos.length + moving.folders.length + moving.routines.length;
     if (n > 1) ghost.insertAdjacentHTML('beforeend', `<b class="ghost-count">${n}</b>`);
     Object.assign(ghost.style, { width: r.width + 'px', height: r.height + 'px', transformOrigin: `${e.clientX - r.left}px ${e.clientY - r.top}px` });
     ghost.dataset.dx = e.clientX - r.left;
     ghost.dataset.dy = e.clientY - r.top;
     document.body.append(ghost);
-    root.querySelectorAll('.tile[data-kind]').forEach((t) => t.classList.toggle('dragging', [...moving.videos, ...moving.folders].includes(t.dataset.id)));
+    root.querySelectorAll('.tile[data-kind]').forEach((t) => t.classList.toggle('dragging', [...moving.videos, ...moving.folders, ...moving.routines].includes(t.dataset.id)));
     root.classList.add('drag-active');
     document.body.classList.add('tile-moving');
   };
 
   root.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || moving) return;
-    const tile = e.target.closest?.('#grid .tile[data-kind="video"], #grid .tile[data-kind="library"]');
+    const tile = e.target.closest?.('#grid .tile[data-kind="video"], #grid .tile[data-kind="library"], #grid .tile[data-kind="routine"]');
     if (!tile || e.target.closest(NO_DRAG)) return;
     press = { x: e.clientX, y: e.clientY, tile };
   });
@@ -1021,9 +1035,9 @@ export function renderLibrary(root, libraryId) {
     setTimeout(() => (suppressClick = false), 300);
     const at = reorderAt;
     const t = dropTarget;
-    const { videos, folders: libs } = moving;
+    const { videos, folders: libs, routines } = moving;
     endMove();
-    if (at) return reorderTo(at, videos[0] || libs[0]);
+    if (at) return reorderTo(at, videos[0] || libs[0] || routines[0]);
     if (t) return moveOrCopy(t.dataset.dropLib || null, videos, libs, e.clientX, e.clientY);
   };
   const onTileKey = (e) => e.key === 'Escape' && moving && endMove();
@@ -1046,11 +1060,12 @@ export function renderLibrary(root, libraryId) {
   const reorderTo = async ({ id, after }, dragged) => {
     const items = arranged().filter((it) => it.x.id !== dragged).map((it) => ({ kind: it.kind, id: it.x.id }));
     const at = items.findIndex((it) => it.id === id);
-    items.splice(at + (after ? 1 : 0), 0, { kind: videoById(dragged) ? 'video' : 'library', id: dragged });
+    items.splice(at + (after ? 1 : 0), 0, { kind: videoById(dragged) ? 'video' : routineById(dragged) ? 'routine' : 'library', id: dragged });
     try {
-      const r = await api.orderItems(items);
+      const r = await api.orderItems(items, shelf.id);
       r.libraries.forEach((l) => upsert('libraries', l));
       r.videos.forEach((v) => upsert('videos', v));
+      r.routines.forEach((x) => upsert('routines', x));
       if (sortBy !== 'custom') {
         sortBy = 'custom';
         try {

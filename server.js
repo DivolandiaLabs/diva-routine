@@ -1150,15 +1150,21 @@ async function handleApi(req, res, parts) {
   if (resource === 'order' && !id && method === 'POST') {
     // { items: [{ kind: 'library'|'video', id }] }: el orden propio de lo que hay en un sitio
     // (carpetas, videos y fotos mezclados), del primero al último.
-    const { items } = await readJson(req);
+    // Las rutinas ancladas guardan su sitio en cada biblioteca (shelf): orderIn[shelf].
+    const { items, shelf } = await readJson(req);
     const libraries = [];
     const videos = [];
+    const routines = [];
     (Array.isArray(items) ? items : []).forEach((it, i) => {
       if (it.kind === 'library') libraries.push(Object.assign(find('libraries', it.id, 'Carpeta'), { order: i }));
-      else videos.push(Object.assign(find('videos', it.id, 'Video'), { order: i }));
+      else if (it.kind === 'routine') {
+        const r = find('routines', it.id, 'Rutina');
+        r.orderIn = { ...(r.orderIn || {}), [String(shelf || '')]: i };
+        routines.push(r);
+      } else videos.push(Object.assign(find('videos', it.id, 'Video'), { order: i }));
     });
     await saveDb();
-    return send(res, 200, { libraries, videos: videos.map(forClient) });
+    return send(res, 200, { libraries, videos: videos.map(forClient), routines });
   }
   if (resource === 'copy' && !id && method === 'POST') {
     // { videos, folders, target }: copias (con sus archivos) en la carpeta o biblioteca target.
