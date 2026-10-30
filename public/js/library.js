@@ -391,7 +391,6 @@ export function renderLibrary(root, libraryId) {
     return `
       <article class="tile tile-folder" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="true" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
         <label class="sel" title="Seleccionar toda la carpeta para una rutina"><input type="checkbox" data-sel-lib="${l.id}"><b class="order"></b></label>
-        <button class="card-rename" data-rename-lib="${l.id}" title="Cambiar el nombre" aria-label="Cambiar el nombre de ${esc(l.name)}">${PENCIL}</button>
         ${lockedIn(l, l.parentId) ? '' : `<button class="card-del" data-del-lib="${l.id}" title="${received ? 'Salir de esta carpeta compartida' : 'Borrar la carpeta y todo lo que tiene'}" aria-label="${received ? 'Salir de' : 'Borrar'} la carpeta ${esc(l.name)}">✕</button>`}
         <a class="tile-thumb" href="#/biblioteca/${l.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((v) => `<span>${videoThumb(v)}</span>`).join('')}</span>`
@@ -923,12 +922,11 @@ export function renderLibrary(root, libraryId) {
       return emit('data');
     }
 
-    // Cambiar el nombre: con el lápiz de una carpeta o pulsando el nombre de cualquier recuadro.
-    const ren = t.closest('[data-rename-lib]');
+    // Cambiar el nombre: pulsando el nombre de cualquier recuadro.
     const nameEl = t.closest('[data-name]');
-    if (ren || nameEl) {
+    if (nameEl) {
       e.preventDefault();
-      const [kind, id] = ren ? ['library', ren.dataset.renameLib] : nameEl.dataset.name.split(':');
+      const [kind, id] = nameEl.dataset.name.split(':');
       return renameInline(t.closest('.tile'), kind, id);
     }
     if (t.closest('[data-act="rename"]')) {
