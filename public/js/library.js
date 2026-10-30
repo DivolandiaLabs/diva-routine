@@ -511,7 +511,7 @@ export function renderLibrary(root, libraryId) {
     const sp = spaceFor('folder', l.id);
     const received = sp && !sp.mine;
     return `
-      <article class="tile tile-folder" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="true" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
+      <article class="tile tile-folder" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="false" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
         <label class="sel" title="Seleccionar toda la carpeta para una rutina"><input type="checkbox" data-sel-lib="${l.id}"><b class="order"></b></label>
         <button class="card-pin${l.pinnedTop ? ' on' : ''}" data-pin-lib="${l.id}" title="${l.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${l.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(l.name)}" aria-pressed="${Boolean(l.pinnedTop)}">${PIN}</button>
         ${lockedIn(l, l.parentId) ? '' : `<button class="card-del" data-del-lib="${l.id}" title="${received ? 'Salir de esta carpeta compartida' : 'Borrar la carpeta y todo lo que tiene'}" aria-label="${received ? 'Salir de' : 'Borrar'} la carpeta ${esc(l.name)}">✕</button>`}
@@ -526,7 +526,7 @@ export function renderLibrary(root, libraryId) {
   };
 
   const videoTile = (v, showFolder) => `
-    <article class="tile tile-${v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="true">
+    <article class="tile tile-${v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="false">
       <label class="sel" title="Seleccionar para una rutina"><input type="checkbox" data-sel-video="${v.id}"><b class="order"></b></label>
       <button class="card-pin${v.pinnedTop ? ' on' : ''}" data-pin-video="${v.id}" title="${v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${v.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(v.title)}" aria-pressed="${Boolean(v.pinnedTop)}">${PIN}</button>
       ${lockedIn(v, v.libraryId) ? '' : `<button class="card-del" data-del-video="${v.id}" title="Borrar" aria-label="Borrar ${esc(v.title)}">✕</button>`}
@@ -758,7 +758,6 @@ export function renderLibrary(root, libraryId) {
   // Se sueltan sobre una carpeta (o sobre la ruta de arriba, para sacarlos). Si lo arrastrado
   // está seleccionado, se mueve todo lo seleccionado.
 
-  const MOVE_TYPE = 'application/x-jazz-mover';
   let moving = null; // { videos: [ids], folders: [ids] }
 
   // Reordenar las bibliotecas: se mantiene pulsada una pestaña (medio segundo), se mueve y se suelta.
@@ -854,22 +853,16 @@ export function renderLibrary(root, libraryId) {
     if (e.target.closest?.('[data-shelf-pill]')) e.preventDefault();
   }, true);
 
-  root.addEventListener('dragstart', (e) => {
-    const tile = e.target.closest?.('.tile[data-kind="video"], .tile[data-kind="library"]');
-    if (!tile) return;
-    const kind = tile.dataset.kind;
-    const inSel = selectedIndex(kind, tile.dataset.id) >= 0 && selection.length > 1;
-    moving = inSel
-      ? { videos: selection.filter((s) => s.type === 'video').map((s) => s.id), folders: selection.filter((s) => s.type === 'library').map((s) => s.id) }
-      : { videos: kind === 'video' ? [tile.dataset.id] : [], folders: kind === 'library' ? [tile.dataset.id] : [] };
-    // Solo este tipo de dato: así no se toma por un link que importar.
-    e.dataTransfer.clearData();
-    e.dataTransfer.setData(MOVE_TYPE, JSON.stringify(moving));
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setDragImage(tile, 40, 40);
-    root.querySelectorAll('.tile[data-kind]').forEach((t) => t.classList.toggle('dragging', [...moving.videos, ...moving.folders].includes(t.dataset.id)));
-    root.classList.add('drag-active');
-  });
+  // Arrastrar carpetas, videos y fotos. Va con el ratón (pulsar, mover y soltar), no con el
+  // arrastrar y soltar del navegador, que en la app de Windows no siempre llega a soltar.
+  //  · Sobre otro elemento de aquí: se recoloca delante o detrás y queda como «Mi orden».
+  //  · En el centro de una carpeta, en la ruta de arriba o en la pestaña de otra biblioteca:
+  //    se elige si moverlo o copiarlo ahí.
+  const NO_DRAG = 'button, input, label, select, textarea, .tile-rename';
+  let press = null; // dónde se pulsó (aún sin mover)
+  let ghost = null; // la copia que sigue al ratón
+  let dropTarget = null; // carpeta, ruta o pestaña bajo el ratón
+  let suppressClick = false; // el clic que llega al soltar no abre nada
 
   // ¿Se puede soltar ahí? No en sí misma ni en sus subcarpetas, ni donde ya está todo.
   const canDropOn = (target) => {
@@ -881,7 +874,6 @@ export function renderLibrary(root, libraryId) {
     const libsHere = moving.folders.every((id) => (libraryById(id)?.parentId || null) === tid);
     return !(vidsHere && libsHere);
   };
-  const dropOf = (e) => e.target.closest?.('[data-drop-lib]');
   // Menú junto al ratón al soltar: Mover aquí / Copiar aquí (Esc o clic fuera, nada).
   const askCopyOrMove = (x, y) => new Promise((resolve) => {
     const menu = document.createElement('div');
@@ -907,91 +899,136 @@ export function renderLibrary(root, libraryId) {
     document.addEventListener('mousedown', outside, true);
     document.addEventListener('keydown', esc, true);
   });
-  // Una carpeta arrastrada al borde de otra del mismo sitio se coloca antes o después de ella
-  // (reordenar); en el centro, se mete dentro.
+
   let reorderAt = null;
-  // Un elemento (carpeta, video o foto) sobre otro de aquí: va delante o detrás. Sobre una
-  // carpeta, solo en sus bordes (en el centro se mete dentro); sobre un video, según la mitad.
-  const reorderOf = (e) => {
+  // Sobre otro elemento de aquí: delante o detrás. Sobre una carpeta, solo en sus bordes (en el
+  // centro se mete dentro); sobre un video o una foto, según la mitad.
+  const reorderOf = (under, x, y) => {
     if (!moving || moving.videos.length + moving.folders.length !== 1 || filters.q.trim()) return null;
-    const t = e.target.closest?.('#grid .tile[data-kind="video"], #grid .tile-folder');
+    const t = under?.closest?.('#grid .tile[data-kind="video"], #grid .tile-folder');
     const draggedId = moving.videos[0] || moving.folders[0];
     if (!t || t.dataset.id === draggedId) return null;
     const r = t.getBoundingClientRect();
     const rows = ['list', 'details'].includes(view);
-    const f = rows ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+    const f = rows ? (y - r.top) / r.height : (x - r.left) / r.width;
     if (t.dataset.kind === 'library') return f < 0.3 ? { el: t, id: t.dataset.id, after: false } : f > 0.7 ? { el: t, id: t.dataset.id, after: true } : null;
     return { el: t, id: t.dataset.id, after: f > 0.5 };
   };
   const clearReorder = () => root.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
-  root.addEventListener('dragover', (e) => {
-    reorderAt = reorderOf(e);
-    clearReorder();
-    if (reorderAt) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      root.querySelectorAll('.drop-over').forEach((x) => x.classList.remove('drop-over'));
-      return reorderAt.el.classList.add(reorderAt.after ? 'drop-after' : 'drop-before');
-    }
-    const t = dropOf(e);
-    if (!t || !canDropOn(t.dataset.dropLib)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    root.querySelectorAll('.drop-over').forEach((x) => x !== t && x.classList.remove('drop-over'));
-    t.classList.add('drop-over');
-  });
-  root.addEventListener('dragleave', (e) => {
-    const t = dropOf(e);
-    if (t && !t.contains(e.relatedTarget)) t.classList.remove('drop-over');
-  });
   const endMove = () => {
     moving = null;
     reorderAt = null;
+    dropTarget = null;
+    press = null;
+    ghost?.remove();
+    ghost = null;
     clearReorder();
     root.classList.remove('drag-active');
+    document.body.classList.remove('tile-moving');
     root.querySelectorAll('.drop-over, .dragging').forEach((x) => x.classList.remove('drop-over', 'dragging'));
   };
-  root.addEventListener('dragend', endMove);
-  root.addEventListener('drop', async (e) => {
-    if (reorderAt && moving) {
-      // Se parte de cómo se ve ahora (sea cual sea el filtro) y queda como «Mi orden».
-      e.preventDefault();
-      const { id, after } = reorderAt;
-      const dragged = moving.videos[0] || moving.folders[0];
-      endMove();
-      const items = arranged().filter((it) => it.x.id !== dragged).map((it) => ({ kind: it.kind, id: it.x.id }));
-      const at = items.findIndex((it) => it.id === id);
-      items.splice(at + (after ? 1 : 0), 0, { kind: libraryById(dragged) && !videoById(dragged) ? 'library' : 'video', id: dragged });
-      try {
-        const r = await api.orderItems(items);
-        r.libraries.forEach((l) => upsert('libraries', l));
-        r.videos.forEach((v) => upsert('videos', v));
-        if (sortBy !== 'custom') {
-          sortBy = 'custom';
-          try {
-            localStorage.setItem('jr-sort', sortBy);
-          } catch {
-            /* solo esta vez */
-          }
-          const sel = root.querySelector('#sortBy');
-          if (sel) sel.value = 'custom';
-          toast('Colocado a mano: ahora se ordena por «Mi orden».');
-        }
-        emit('data');
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-      return;
-    }
-    const t = dropOf(e);
-    if (!t || !moving) return;
+
+  const startMove = (tile, e) => {
+    const kind = tile.dataset.kind;
+    const inSel = selectedIndex(kind, tile.dataset.id) >= 0 && selection.length > 1;
+    moving = inSel
+      ? { videos: selection.filter((x) => x.type === 'video').map((x) => x.id), folders: selection.filter((x) => x.type === 'library').map((x) => x.id) }
+      : { videos: kind === 'video' ? [tile.dataset.id] : [], folders: kind === 'library' ? [tile.dataset.id] : [] };
+    window.getSelection()?.removeAllRanges();
+    const r = tile.getBoundingClientRect();
+    ghost = tile.cloneNode(true);
+    ghost.classList.add('tile-ghost');
+    ghost.classList.remove('on', 'dragging');
+    const n = moving.videos.length + moving.folders.length;
+    if (n > 1) ghost.insertAdjacentHTML('beforeend', `<b class="ghost-count">${n}</b>`);
+    Object.assign(ghost.style, { width: r.width + 'px', height: r.height + 'px', transformOrigin: `${e.clientX - r.left}px ${e.clientY - r.top}px` });
+    ghost.dataset.dx = e.clientX - r.left;
+    ghost.dataset.dy = e.clientY - r.top;
+    document.body.append(ghost);
+    root.querySelectorAll('.tile[data-kind]').forEach((t) => t.classList.toggle('dragging', [...moving.videos, ...moving.folders].includes(t.dataset.id)));
+    root.classList.add('drag-active');
+    document.body.classList.add('tile-moving');
+  };
+
+  root.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || moving) return;
+    const tile = e.target.closest?.('#grid .tile[data-kind="video"], #grid .tile[data-kind="library"]');
+    if (!tile || e.target.closest(NO_DRAG)) return;
+    press = { x: e.clientX, y: e.clientY, tile };
+  });
+  const onTileMove = (e) => {
+    if (press && !moving && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) startMove(press.tile, e);
+    if (!moving || !ghost) return;
     e.preventDefault();
-    const target = t.dataset.dropLib || null;
-    if (!canDropOn(target)) return endMove();
+    ghost.style.transform = `translate(${e.clientX - ghost.dataset.dx}px, ${e.clientY - ghost.dataset.dy}px) scale(0.55)`;
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    clearReorder();
+    root.querySelectorAll('.drop-over').forEach((x) => x.classList.remove('drop-over'));
+    reorderAt = reorderOf(under, e.clientX, e.clientY);
+    dropTarget = null;
+    if (reorderAt) return reorderAt.el.classList.add(reorderAt.after ? 'drop-after' : 'drop-before');
+    const t = under?.closest?.('[data-drop-lib]');
+    if (t && root.contains(t) && canDropOn(t.dataset.dropLib)) {
+      dropTarget = t;
+      t.classList.add('drop-over');
+    }
+  };
+  const onTileUp = async (e) => {
+    if (!moving) return (press = null);
+    suppressClick = true;
+    setTimeout(() => (suppressClick = false), 300);
+    const at = reorderAt;
+    const t = dropTarget;
     const { videos, folders: libs } = moving;
     endMove();
-    // Al soltar se elige qué hacer: moverlo o dejar una copia ahí.
-    const how = await askCopyOrMove(e.clientX, e.clientY);
+    if (at) return reorderTo(at, videos[0] || libs[0]);
+    if (t) return moveOrCopy(t.dataset.dropLib || null, videos, libs, e.clientX, e.clientY);
+  };
+  const onTileKey = (e) => e.key === 'Escape' && moving && endMove();
+  document.addEventListener('pointermove', onTileMove);
+  document.addEventListener('pointerup', onTileUp);
+  document.addEventListener('pointercancel', endMove);
+  document.addEventListener('keydown', onTileKey);
+  root.addEventListener('click', (e) => {
+    if (!suppressClick) return;
+    suppressClick = false;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+  // Sin el arrastrar del navegador (imágenes y links de los recuadros).
+  root.addEventListener('dragstart', (e) => {
+    if (e.target.closest?.('#grid .tile')) e.preventDefault();
+  }, true);
+
+  // Recolocar: se parte de cómo se ve ahora (sea cual sea el filtro) y queda como «Mi orden».
+  const reorderTo = async ({ id, after }, dragged) => {
+    const items = arranged().filter((it) => it.x.id !== dragged).map((it) => ({ kind: it.kind, id: it.x.id }));
+    const at = items.findIndex((it) => it.id === id);
+    items.splice(at + (after ? 1 : 0), 0, { kind: videoById(dragged) ? 'video' : 'library', id: dragged });
+    try {
+      const r = await api.orderItems(items);
+      r.libraries.forEach((l) => upsert('libraries', l));
+      r.videos.forEach((v) => upsert('videos', v));
+      if (sortBy !== 'custom') {
+        sortBy = 'custom';
+        try {
+          localStorage.setItem('jr-sort', sortBy);
+        } catch {
+          /* solo esta vez */
+        }
+        const sel = root.querySelector('#sortBy');
+        if (sel) sel.value = 'custom';
+        toast('Colocado a mano: ahora se ordena por «Mi orden».');
+      }
+      emit('data');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+
+  // Llevar a otra carpeta o biblioteca: se elige mover o copiar.
+  const moveOrCopy = async (target, videos, libs, x, y) => {
+    const how = await askCopyOrMove(x, y);
     if (!how) return;
     const where = target ? libraryLabel(libraryById(target)) : shelfName(rootLibrary());
     const n = videos.length + libs.length;
@@ -1015,7 +1052,7 @@ export function renderLibrary(root, libraryId) {
       await refresh();
       emit('data');
     }
-  });
+  };
 
   // Arrastrar archivos o links a la cuadrícula.
   const main = $('#main');
@@ -1474,6 +1511,11 @@ export function renderLibrary(root, libraryId) {
     window.removeEventListener('store', onStore);
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('pointermove', onPillMove);
+    document.removeEventListener('pointermove', onTileMove);
+    document.removeEventListener('pointerup', onTileUp);
+    document.removeEventListener('pointercancel', endMove);
+    document.removeEventListener('keydown', onTileKey);
+    endMove();
     document.removeEventListener('pointerup', onPillUp);
     document.removeEventListener('keydown', onPillEsc);
     endShelfDrag(null);

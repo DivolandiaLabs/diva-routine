@@ -789,3 +789,14 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 .sorter:focus-within { color: var(--accent); border-color: var(--accent); }
 /* recolocar: la barra de color también en carpetas cuando van mezcladas */
 .tile-folder.drop-before::after, .tile-folder.drop-after::after { background: var(--accent); }
+
+/* ---------- arrastrar recuadros con el ratón ---------- */
+#grid .tile, #grid .tile * { -webkit-user-drag: none; }
+.tile[data-kind="video"], .tile-folder { cursor: grab; }
+body.tile-moving, body.tile-moving * { cursor: grabbing !important; user-select: none !important; }
+.tile-ghost {
+  position: fixed; left: 0; top: 0; z-index: 300; pointer-events: none; margin: 0 !important;
+  opacity: 0.92; box-shadow: 0 18px 40px rgb(0 0 0 / 0.5); border-radius: 16px; transition: none;
+}
+.tile-ghost .card-del, .tile-ghost .card-pin, .tile-ghost .sel { display: none; }
+.ghost-count { position: absolute; top: -10px; right: -10px; min-width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 1.1rem; box-shadow: 0 2px 8px rgb(0 0 0 / 0.4); }
