@@ -16,6 +16,16 @@ import { openShare, SHARE_TAG } from './share.js';
 
 const URL_RE = /^https?:\/\//i;
 
+const sq = (x, y, s) => `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="1.5"/>`;
+const VIEW_ICON = {
+  xl: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${sq(4, 4, 16)}</svg>`,
+  l: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${sq(3, 3, 8) + sq(13, 3, 8) + sq(3, 13, 8) + sq(13, 13, 8)}</svg>`,
+  m: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${[3, 10, 17].flatMap((y) => [3, 10, 17].map((x) => sq(x, y, 4.5))).join('')}</svg>`,
+  s: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${[3, 8, 13, 18].flatMap((y) => [3, 8, 13, 18].map((x) => `<rect x="${x}" y="${y}" width="3" height="3" rx="0.6"/>`)).join('')}</svg>`,
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><rect x="3" y="4.5" width="3" height="3" rx="0.6"/><rect x="3" y="10.5" width="3" height="3" rx="0.6"/><rect x="3" y="16.5" width="3" height="3" rx="0.6"/></svg>',
+  details: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 5h18M3 10h18M3 15h18M3 20h18M10 3v19"/></svg>',
+};
+
 const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const PENCIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11a2.1 2.1 0 0 0-3-3L5 16z"/></svg>';
 const FOLDER = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>';
@@ -44,6 +54,18 @@ export function renderLibrary(root, libraryId) {
   const folder = lib0 && !lib0.root ? lib0 : null; // null = la raíz
   const here = () => folder?.id || rootLibrary().id;
   const filters = { q: '' };
+  // Vistas como en el explorador de archivos (se recuerda la elegida). Ctrl + rueda cambia de una a otra.
+  const VIEWS = [
+    ['xl', 'Iconos muy grandes'], ['l', 'Iconos grandes'], ['m', 'Iconos medianos'],
+    ['s', 'Iconos pequeños'], ['list', 'Lista'], ['details', 'Detalles'],
+  ];
+  let view = 'm';
+  try {
+    const saved = localStorage.getItem('jr-view');
+    if (VIEWS.some(([k]) => k === saved)) view = saved;
+  } catch {
+    /* sin almacenamiento: la de siempre */
+  }
   // Opción abierta. Al volver de elegir el tramo de un video (por donde sea), sigue «Sacar dibujos».
   let panel = ui.returnToDraw ? 'draw' : ui.openPanel;
   ui.openPanel = null;
@@ -63,6 +85,7 @@ export function renderLibrary(root, libraryId) {
             : '<h2>Biblioteca</h2>'}</nav>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
           <span class="count" id="count"></span>
+          <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
         </header>
         <div class="ig-callout" id="igTuto" hidden></div>
         <div class="ig-linked share-bar" id="shareBar" hidden></div>
@@ -408,7 +431,19 @@ export function renderLibrary(root, libraryId) {
       </article>`;
   };
 
+  const setView = (v) => {
+    view = v;
+    try {
+      localStorage.setItem('jr-view', v);
+    } catch {
+      /* solo esta vez */
+    }
+    $('#grid').className = `tiles view-${v}`;
+    root.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
+  };
+
   const drawGrid = () => {
+    setView(view);
     const { libs, vids } = visible();
     const searching = Boolean(filters.q.trim());
     const pinned = !folder && !searching ? state.routines.filter((r) => r.pinned) : [];
@@ -419,6 +454,21 @@ export function renderLibrary(root, libraryId) {
           <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`;
     drawSelection();
   };
+
+  root.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-view]');
+    if (b) setView(b.dataset.view);
+  });
+  // Ctrl + rueda: hacia arriba, iconos más grandes; hacia abajo, más pequeños, lista y detalles.
+  let wheelAt = 0;
+  root.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey || !e.target.closest('#main')) return;
+    e.preventDefault();
+    if (Date.now() - wheelAt < 180) return; // un paso por golpe de rueda
+    wheelAt = Date.now();
+    const i = VIEWS.findIndex(([k]) => k === view) + (e.deltaY > 0 ? 1 : -1);
+    if (i >= 0 && i < VIEWS.length) setView(VIEWS[i][0]);
+  }, { passive: false });
 
   let gridTimer = null;
   const drawGridSoon = () => {
@@ -610,7 +660,30 @@ export function renderLibrary(root, libraryId) {
     return !(vidsHere && libsHere);
   };
   const dropOf = (e) => e.target.closest?.('[data-drop-lib]');
+  // Una carpeta arrastrada al borde de otra del mismo sitio se coloca antes o después de ella
+  // (reordenar); en el centro, se mete dentro.
+  let reorderAt = null;
+  const reorderOf = (e) => {
+    if (!moving || moving.videos.length || moving.folders.length !== 1) return null;
+    const t = e.target.closest?.('.tile-folder');
+    const dragged = libraryById(moving.folders[0]);
+    const over = t && libraryById(t.dataset.id);
+    if (!over || over.id === dragged.id || (over.parentId || null) !== (dragged.parentId || null) || filters.q.trim()) return null;
+    const r = t.getBoundingClientRect();
+    const rows = ['list', 'details'].includes(view);
+    const f = rows ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+    return f < 0.3 ? { el: t, id: over.id, after: false } : f > 0.7 ? { el: t, id: over.id, after: true } : null;
+  };
+  const clearReorder = () => root.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
   root.addEventListener('dragover', (e) => {
+    reorderAt = reorderOf(e);
+    clearReorder();
+    if (reorderAt) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      root.querySelectorAll('.drop-over').forEach((x) => x.classList.remove('drop-over'));
+      return reorderAt.el.classList.add(reorderAt.after ? 'drop-after' : 'drop-before');
+    }
     const t = dropOf(e);
     if (!t || !canDropOn(t.dataset.dropLib)) return;
     e.preventDefault();
@@ -624,11 +697,29 @@ export function renderLibrary(root, libraryId) {
   });
   const endMove = () => {
     moving = null;
+    reorderAt = null;
+    clearReorder();
     root.classList.remove('drag-active');
     root.querySelectorAll('.drop-over, .dragging').forEach((x) => x.classList.remove('drop-over', 'dragging'));
   };
   root.addEventListener('dragend', endMove);
   root.addEventListener('drop', async (e) => {
+    if (reorderAt && moving) {
+      e.preventDefault();
+      const { id, after } = reorderAt;
+      const dragged = moving.folders[0];
+      endMove();
+      const ids = childFolders(libraryById(dragged).parentId || null).map((l) => l.id).filter((x) => x !== dragged);
+      ids.splice(ids.indexOf(id) + (after ? 1 : 0), 0, dragged);
+      try {
+        const r = await api.orderLibraries(ids);
+        r.libraries.forEach((l) => upsert('libraries', l));
+        emit('data');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
     const t = dropOf(e);
     if (!t || !moving) return;
     e.preventDefault();

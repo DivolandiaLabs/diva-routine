@@ -41,6 +41,7 @@ export const api = {
   createLibrary: (name, parentId = null) => request('POST', '/api/libraries', { name, parentId }),
   renameLibrary: (id, name) => request('PUT', `/api/libraries/${id}`, { name }),
   updateLibrary: (id, data) => request('PUT', `/api/libraries/${id}`, data),
+  orderLibraries: (ids) => request('POST', '/api/libraries/order', { ids }),
   deleteLibrary: (id) => request('DELETE', `/api/libraries/${id}`),
   syncLibrary: (id) => request('POST', `/api/libraries/${id}/sync`),
   unlinkCollection: (id, collectionId) => request('DELETE', `/api/libraries/${id}/collections/${encodeURIComponent(collectionId)}`),

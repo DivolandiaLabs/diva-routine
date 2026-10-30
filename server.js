@@ -1236,6 +1236,14 @@ async function handleApi(req, res, parts) {
       await saveDb();
       return send(res, 201, lib);
     }
+    if (id === 'order' && method === 'POST') {
+      // { ids }: el orden de unas carpetas (las de un mismo sitio), de la primera a la última.
+      const { ids } = await readJson(req);
+      const libs = (Array.isArray(ids) ? ids : []).map((x) => find('libraries', x, 'Carpeta'));
+      libs.forEach((l, i) => (l.order = i));
+      await saveDb();
+      return send(res, 200, { libraries: libs });
+    }
     const lib = find('libraries', id, 'Biblioteca');
     if (action === 'sync' && method === 'POST') {
       // Trae los posts nuevos de las colecciones de Instagram enlazadas a esta biblioteca.

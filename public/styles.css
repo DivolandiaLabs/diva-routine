@@ -616,3 +616,44 @@ body.login-mode .topbar { display: none; }
 .saved-list label:hover { background: var(--accent-soft); }
 .saved-list .saved-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .net-off { margin-top: 4px; }
+
+/* ---------- vistas de la Biblioteca (como el explorador de archivos) ---------- */
+.views { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; }
+.view-btn { width: 30px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+.view-btn svg { width: 16px; height: 16px; }
+.view-btn:hover { color: var(--text, inherit); background: var(--accent-soft); }
+.view-btn.on { background: var(--accent-soft); color: var(--accent); }
+.tiles.view-xl { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.tiles.view-l { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.tiles.view-m { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.tiles.view-s { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+.tiles.view-s .tile-body { padding: 6px 8px 8px; gap: 2px; }
+.tiles.view-s .tile-body h3 { font-size: 0.8rem; }
+.tiles.view-s .meta { font-size: 0.72rem; }
+.tiles.view-s .meta .badge, .tiles.view-s .meta .vstatus { display: none; }
+.tiles.view-s .sel { top: 4px; left: 4px; padding: 2px 4px; }
+/* lista y detalles: filas */
+.tiles.view-list, .tiles.view-details { grid-template-columns: 1fr; gap: 4px; }
+.tiles.view-list { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.view-list .tile, .view-details .tile { flex-direction: row; align-items: center; border-radius: 10px; box-shadow: none; min-height: 52px; transform: none !important; }
+.view-list .tile-folder, .view-details .tile-folder { margin-top: 0; border-radius: 10px; box-shadow: none; }
+.view-list .tile-folder::before, .view-details .tile-folder::before { display: none; }
+.view-list .tile-thumb, .view-details .tile-thumb { width: 44px; height: 44px; aspect-ratio: auto; flex: none; margin: 4px 0 4px 40px; border-radius: 6px !important; }
+.view-list .tile-body, .view-details .tile-body { flex: 1; min-width: 0; padding: 6px 12px; background: none !important; border-radius: 0 !important; }
+.view-list .sel, .view-details .sel { top: 50%; transform: translateY(-50%); }
+.view-list .tile-body h3, .view-details .tile-body h3 { font-size: 0.9rem; }
+.view-list .meta { font-size: 0.76rem; }
+.view-list .meta .badge, .view-list .meta .vstatus { display: none; }
+.view-details .tile-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 16px; }
+.view-details .tile-body .meta { justify-content: flex-start; }
+.view-details .tile:nth-child(even) { background: color-mix(in srgb, var(--accent) 3%, var(--surface)); }
+.view-list .card-rename, .view-details .card-rename { top: 50%; transform: translateY(-50%); right: 44px; }
+.view-list .card-del, .view-details .card-del { top: 50%; transform: translateY(-50%); }
+/* reordenar carpetas arrastrándolas al borde de otra */
+.tile.drop-before, .tile.drop-after { outline: none !important; }
+.tile.drop-before::after, .tile.drop-after::after { content: ""; position: absolute; z-index: 3; background: var(--accent); border-radius: 3px; top: -6px; bottom: -6px; width: 4px; }
+.tile.drop-before::after { left: -11px; }
+.tile.drop-after::after { right: -11px; }
+.view-list .tile.drop-before::after, .view-list .tile.drop-after::after, .view-details .tile.drop-before::after, .view-details .tile.drop-after::after { left: 0; right: 0; width: auto; height: 3px; top: auto; bottom: auto; }
+.view-list .tile.drop-before::after, .view-details .tile.drop-before::after { top: -4px; }
+.view-list .tile.drop-after::after, .view-details .tile.drop-after::after { bottom: -4px; }

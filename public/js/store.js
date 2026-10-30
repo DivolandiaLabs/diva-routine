@@ -71,7 +71,10 @@ export const linkedLibraries = () => state.libraries.filter((l) => l.igCollectio
 export const rootLibrary = () => state.libraries.find((l) => l.root) || state.libraries[0];
 export const folders = () => state.libraries.filter((l) => !l.root);
 /** Carpetas que hay justo dentro de otra (parentId null = las de la Biblioteca). */
-export const childFolders = (parentId) => folders().filter((l) => (l.parentId || null) === (parentId || null));
+// En el orden que les hayas dado arrastrándolas (las que no tienen, al final, como se crearon).
+export const childFolders = (parentId) => folders()
+  .filter((l) => (l.parentId || null) === (parentId || null))
+  .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
 /** La carpeta y las de encima, de fuera hacia dentro: [jszz, giros]. */
 export function folderPath(lib) {
   const out = [];
