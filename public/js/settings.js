@@ -156,8 +156,8 @@ export function renderSettings(root) {
         <section class="set-card" id="appCard" hidden></section>
         <section class="set-card" id="googleCard"></section>
         <section class="set-card" id="collabCard"></section>
-        <section class="set-card">
-          <h3>Otra forma: una carpeta compartida</h3>
+        <details class="set-card set-fold">
+          <summary><h3>Otra forma: una carpeta compartida</h3></summary>
           <p>Sin cuenta de Google: todos los ordenadores usan <b>la misma carpeta de datos</b>, en un sitio compartido (un disco de la red de casa, o una carpeta de OneDrive, Google Drive o Dropbox instalados en cada ordenador).</p>
           ${s.error ? `<p class="ig-msg error">${esc(s.error)}</p>` : ''}
           <dl class="set-list">
@@ -184,7 +184,7 @@ export function renderSettings(root) {
             </ol>
             <p>Puedes tener la app abierta en dos ordenadores, y cada uno ve los cambios del otro en unos segundos; pero si los dos cambian lo mismo a la vez, se queda el último. La app avisa arriba cuando está abierta en otro ordenador.</p>
           </details>
-        </section>
+        </details>
       </div>`;
   };
 
