@@ -118,6 +118,105 @@ export function renderLibrary(root, libraryId) {
 
   const panelHead = (title) => `<header><h3>${title}</h3><button class="x" data-close aria-label="Cerrar">✕</button></header>`;
 
+  // ---------- Redes sociales: lo guardado en cada cuenta ----------
+  // savedCache[red] = { items } | { error } (sin leer: undefined). Lo marcado se recuerda al repintar.
+  const savedOpen = new Set();
+  const savedCache = {};
+  const savedChecked = new Set();
+  const SAVED_HINT = {
+    instagram: 'Tus colecciones de Guardados, también las privadas.',
+    youtube: 'Tus listas, «Ver más tarde» y «Me gusta».',
+    tiktok: 'Tus colecciones y perfiles.',
+    facebook: 'Tus videos guardados.',
+  };
+  const isImported = (key, id) => state.libraries.some((l) => (key === 'instagram' ? l.igCollections?.some((c) => c.id === id) : l.lists?.some((x) => x.url === id)));
+
+  const savedBody = (key) => {
+    if (key === 'tiktok' || key === 'facebook') {
+      // Estas redes no dejan leer la lista de lo guardado: se pega el link.
+      return `<p class="hint">${key === 'tiktok' ? 'TikTok no deja ver tus guardados desde fuera: pega el link de una colección o de un perfil.' : 'Facebook no deja ver tus guardados desde fuera: pega el link de cada video.'}</p>
+        <div class="row ig-add"><input id="savedUrl-${key}" placeholder="Pega el link" aria-label="Link de ${NET_INFO[key].name}"><button class="btn small primary" data-saved-url="${key}">Importar</button></div>`;
+    }
+    const c = savedCache[key];
+    if (!c) return '<p class="hint"><span class="spin"></span> Leyendo tus guardados…</p>';
+    if (c.error) return `<p class="ig-msg error">${esc(c.error)}</p><button class="btn small" data-saved-retry="${key}">Reintentar</button>`;
+    if (!c.items.length) return '<p class="hint">No hay nada guardado.</p>';
+    const n = c.items.filter((it) => savedChecked.has(`${key}|${it.id}`)).length;
+    return `<ul class="saved-list">${c.items.map((it) => `
+        <li><label><input type="checkbox" data-saved-check="${esc(`${key}|${it.id}`)}" ${savedChecked.has(`${key}|${it.id}`) ? 'checked' : ''}>
+          <span class="saved-name">${esc(it.name)}</span>${it.count != null ? `<span class="hint">${it.count}</span>` : ''}${isImported(key, it.id) ? '<span class="badge">importada</span>' : ''}</label></li>`).join('')}</ul>
+      <div class="row wrap"><button class="btn small primary" data-saved-import="${key}" ${n ? '' : 'disabled'}>Importar${n ? ` (${n})` : ''}</button><span class="hint" id="savedBusy-${key}"></span></div>
+      <p class="hint">Cada una va a su carpeta; si ya está importada, trae solo lo nuevo.</p>`;
+  };
+
+  const loadSaved = async (key) => {
+    if (key === 'tiktok' || key === 'facebook') return;
+    try {
+      if (key === 'instagram') {
+        const { collections } = await api.igCollections();
+        savedCache[key] = { items: collections.map((c) => ({ id: c.id, name: c.name, count: c.count ?? null })) };
+      } else {
+        const { lists } = await api.youtubeLists();
+        savedCache[key] = { items: lists.map((l) => ({ id: l.url, name: l.name, count: null })) };
+      }
+    } catch (e) {
+      savedCache[key] = { error: e.message };
+    }
+    if (panel === 'instagram') drawPanel();
+  };
+
+  const finishImport = async (created, libs) => {
+    await refresh();
+    emit('data');
+    queueDownload(created.filter(canDownload).map((v) => v.id));
+    toast(created.length ? `${created.length} video(s) importado(s). Se descargan solos.` : 'No había nada nuevo.');
+    if (libs.size === 1) location.hash = `#/biblioteca/${[...libs][0]}`;
+  };
+
+  const importSaved = async (key, btn) => {
+    const items = savedCache[key].items.filter((it) => savedChecked.has(`${key}|${it.id}`));
+    btn.disabled = true;
+    const created = [];
+    const libs = new Set();
+    try {
+      for (const [i, it] of items.entries()) {
+        $(`#savedBusy-${key}`).textContent = `Importando «${it.name}» (${i + 1} de ${items.length})…`;
+        const r = key === 'instagram' ? await api.igImport({ id: it.id, name: it.name }, null) : await api.importList(it.id, it.name);
+        upsert('libraries', r.library);
+        r.created.forEach((v) => upsert('videos', v));
+        created.push(...r.created);
+        libs.add(r.library.id);
+        savedChecked.delete(`${key}|${it.id}`);
+      }
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    await finishImport(created, libs);
+  };
+
+  const importSavedUrl = async (key, btn) => {
+    const input = $(`#savedUrl-${key}`);
+    const url = input.value.trim();
+    if (!URL_RE.test(url)) return input.focus();
+    btn.disabled = true;
+    try {
+      if (key === 'facebook') {
+        const r = await api.addLinks([url], here());
+        const made = r.created || [];
+        made.forEach((v) => upsert('videos', v));
+        await finishImport(made, new Set());
+      } else {
+        const r = await api.importList(url, null);
+        upsert('libraries', r.library);
+        r.created.forEach((v) => upsert('videos', v));
+        await finishImport(r.created, new Set([r.library.id]));
+      }
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message, 'error');
+    }
+  };
+
   const PANELS = {
     import: () => `
       ${panelHead('Importar')}
@@ -136,33 +235,30 @@ export function renderLibrary(root, libraryId) {
       <input id="newLib" placeholder="Nombre de la carpeta" aria-label="Nombre de la carpeta">
       <div class="row"><button class="btn primary" data-act="new-lib">Crear carpeta</button></div>`,
 
-    // Redes sociales: cada una con su estado, su tutorial para conectarla y sus listas.
+    // Redes sociales: sin conectar, un solo botón «Conectar cuenta» (abre el tutorial); conectada,
+    // un desplegable con lo que tienes guardado en esa red para marcarlo e importarlo.
     instagram: () => {
-      const s = state.instagram;
       const linked = linkedLibraries();
-      const ig = s.connected
-        ? `<p>Conectado${s.username ? ` como <b>@${esc(s.username)}</b>` : ''}.</p>
-           <div class="row wrap">
-             <button class="btn primary small" data-act="ig-collections">Importar colecciones</button>
-             <button class="btn small ghost danger" data-act="ig-disconnect">Desconectar</button>
-           </div>`
-        : `<p class="hint">${s.expired ? 'La sesión caducó: vuelve a conectarla.' : 'Tus colecciones de Guardados, también las privadas.'}</p>
-           <div class="row"><button class="btn primary small" data-act="ig-connect">${s.expired ? 'Volver a conectar' : 'Conectar (paso a paso)'}</button></div>`;
-      const net = (key) => {
-        const n = NET_INFO[key];
-        const on = state.social?.[key]?.connected;
+      const card = (key) => {
+        const ig = key === 'instagram';
+        const n = ig ? { name: 'Instagram', color: '#e1306c' } : NET_INFO[key];
+        const on = ig ? state.instagram.connected : state.social?.[key]?.connected;
+        const expired = ig && state.instagram.expired;
+        const who = ig && state.instagram.username ? ` como <b>@${esc(state.instagram.username)}</b>` : '';
+        const body = on
+          ? `<p class="hint">Conectado${who}.</p>
+             <details class="net-saved" data-saved="${key}" ${savedOpen.has(key) ? 'open' : ''}>
+               <summary>Tus guardados</summary>
+               <div class="saved-body">${savedBody(key)}</div>
+             </details>
+             <button class="btn small ghost danger net-off" data-net-off="${key}">Desconectar</button>`
+          : `<p class="hint">${expired ? 'La sesión caducó: vuelve a conectarla.' : SAVED_HINT[key]}</p>
+             <div class="row"><button class="btn primary small" data-net-connect="${key}">${expired ? 'Volver a conectar' : 'Conectar cuenta'}</button></div>`;
         return `<section class="net-card" style="--net:${n.color}">
-          <h4>${NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>
-          <p class="hint">${key === 'facebook' ? 'Videos uno a uno (Facebook no deja leer listas).' : key === 'youtube' ? 'Tus listas, «Ver más tarde» y «Me gusta».' : 'Colecciones públicas y perfiles.'}</p>
-          <div class="row wrap">
-            ${n.lists ? `<button class="btn small primary" data-net-lists="${key}">Importar listas</button>` : ''}
-            <button class="btn small ${n.lists ? '' : 'primary'}" data-net="${key}">${on ? 'Cuenta conectada' : 'Conectar (paso a paso)'}</button>
-          </div>
-        </section>`;
+          <h4>${ig ? ICON.instagram : NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${body}</section>`;
       };
       return `${panelHead('Redes sociales')}
-        <section class="net-card" style="--net:#e1306c"><h4>${ICON.instagram}Instagram${s.connected ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${ig}</section>
-        ${net('youtube')}${net('tiktok')}${net('facebook')}
+        ${['instagram', 'youtube', 'tiktok', 'facebook'].map(card).join('')}
         ${linked.length ? `<h4 class="sh-sub">Carpetas enlazadas</h4>
           <ul class="panel-list">${linked.map((l) => `<li><a href="#/biblioteca/${l.id}">${esc(libraryLabel(l))}</a> <span class="hint">← ${[...(l.igCollections || []).map((c) => c.name), ...(l.lists || []).map((x) => x.name)].map((x) => `«${esc(x)}»`).join(', ')}</span></li>`).join('')}</ul>
           <div class="row"><button class="btn small" data-act="ig-sync-all">Sincronizar todo</button></div>` : ''}`;
@@ -217,6 +313,15 @@ export function renderLibrary(root, libraryId) {
       if (el && [...(el.options || [{ value }])].some((o) => o.value === value)) el.value = value;
     }
     if (panel === 'import') drawPasted();
+    box.querySelectorAll('details.net-saved').forEach((d) => {
+      const key = d.dataset.saved;
+      d.addEventListener('toggle', () => {
+        if (!d.open) return savedOpen.delete(key);
+        savedOpen.add(key);
+        if (!savedCache[key]) loadSaved(key);
+      });
+      if (d.open && !savedCache[key]) loadSaved(key);
+    });
     drawMenu();
   };
 
@@ -616,6 +721,14 @@ export function renderLibrary(root, libraryId) {
     const t = e.target;
     if (t.dataset.selVideo) toggleSelected('video', t.dataset.selVideo);
     else if (t.dataset.selLib) toggleSelected('library', t.dataset.selLib);
+    else if (t.dataset.savedCheck) {
+      t.checked ? savedChecked.add(t.dataset.savedCheck) : savedChecked.delete(t.dataset.savedCheck);
+      const key = t.dataset.savedCheck.split('|')[0];
+      const n = [...savedChecked].filter((k) => k.startsWith(key + '|')).length;
+      const btn = root.querySelector(`[data-saved-import="${key}"]`);
+      btn.disabled = !n;
+      btn.textContent = n ? `Importar (${n})` : 'Importar';
+    }
     else if (t.id === 'toRoutine') syncRoutineTarget();
     else if (t.id === 'libName') {
       api.renameLibrary(folder.id, t.value.trim() || folder.name).then((l) => (upsert('libraries', l), emit('data')));
@@ -700,6 +813,35 @@ export function renderLibrary(root, libraryId) {
       upsert('libraries', await api.updateLibrary(folder.id, { name: igName.dataset.igName, nameLocked: false }));
       $('#libName').value = igName.dataset.igName;
       return emit('data');
+    }
+    const netConnect = t.closest('[data-net-connect]');
+    if (netConnect) {
+      const key = netConnect.dataset.netConnect;
+      return key === 'instagram' ? openInstagram({ view: 'connect' }) : openNet(key);
+    }
+    const netOff = t.closest('[data-net-off]');
+    if (netOff) {
+      const key = netOff.dataset.netOff;
+      const name = key === 'instagram' ? 'Instagram' : NET_INFO[key].name;
+      if (!confirm(`¿Desconectar tu cuenta de ${name}? Lo importado se queda.`)) return;
+      if (key === 'instagram') state.instagram = await api.igDisconnect();
+      else {
+        await api.socialDisconnect(key);
+        state.social = await api.socialStatus();
+      }
+      delete savedCache[key];
+      emit('data');
+      return toast(`${name} desconectado`);
+    }
+    const savedImport = t.closest('[data-saved-import]');
+    if (savedImport) return importSaved(savedImport.dataset.savedImport, savedImport);
+    const savedUrl = t.closest('[data-saved-url]');
+    if (savedUrl) return importSavedUrl(savedUrl.dataset.savedUrl, savedUrl);
+    const savedRetry = t.closest('[data-saved-retry]');
+    if (savedRetry) {
+      delete savedCache[savedRetry.dataset.savedRetry];
+      drawPanel();
+      return loadSaved(savedRetry.dataset.savedRetry);
     }
     const netBtn = t.closest('[data-net], [data-net-lists]');
     if (netBtn) return netBtn.dataset.netLists ? openNet(netBtn.dataset.netLists, { view: 'lists' }) : openNet(netBtn.dataset.net, { view: state.social?.[netBtn.dataset.net]?.connected && NET_INFO[netBtn.dataset.net].lists ? 'lists' : null });

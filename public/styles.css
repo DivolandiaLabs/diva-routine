@@ -609,3 +609,10 @@ body.login-mode .topbar { display: none; }
 .set-fold[open] > summary { margin-bottom: 12px; }
 .account { overflow: hidden; }
 .account img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.net-saved { margin: 8px 0; }
+.net-saved > summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.saved-list { list-style: none; margin: 6px 0 10px; padding: 0; max-height: 260px; overflow: auto; display: grid; gap: 2px; }
+.saved-list label { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px; cursor: pointer; }
+.saved-list label:hover { background: var(--accent-soft); }
+.saved-list .saved-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.net-off { margin-top: 4px; }
