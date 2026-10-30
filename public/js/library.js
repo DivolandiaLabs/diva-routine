@@ -161,7 +161,7 @@ export function renderLibrary(root, libraryId) {
         <div class="row ig-add"><input id="savedUrl-${key}" placeholder="Pega el link" aria-label="Link de ${NET_INFO[key].name}"><button class="btn small primary" data-saved-url="${key}">Importar</button></div>`;
     }
     const c = savedCache[key];
-    if (!c) return '<p class="hint"><span class="spin"></span> Leyendo tus guardados…</p>';
+    if (!c || c.loading) return `<div class="saved-progress" data-progress="${key}"><div class="bar"><i style="width:${savedPct(key)}%"></i></div><span class="hint">Leyendo tus guardados… <b>${savedSecs(key)} s</b></span></div>`;
     if (c.error) return `<p class="ig-msg error">${esc(c.error)}</p><button class="btn small" data-saved-retry="${key}">Reintentar</button>`;
     if (!c.items.length) return '<p class="hint">No hay nada guardado.</p>';
     const n = c.items.filter((it) => savedChecked.has(`${key}|${it.id}`)).length;
@@ -172,8 +172,31 @@ export function renderLibrary(root, libraryId) {
       <p class="hint">Cada una va a su carpeta; si ya está importada, trae solo lo nuevo.</p>`;
   };
 
+  // Barra de progreso al leer: no se sabe cuánto hay, así que avanza con el tiempo (cada vez más
+  // despacio, sin llegar al final) y se completa cuando llega la respuesta.
+  const savedStart = {};
+  const savedSecs = (key) => Math.floor((Date.now() - (savedStart[key] || Date.now())) / 1000);
+  const savedPct = (key) => Math.round(92 * (1 - Math.exp(-(Date.now() - (savedStart[key] || Date.now())) / 6000)));
+  let progressTimer = null;
+  const tickProgress = () => {
+    clearInterval(progressTimer);
+    progressTimer = setInterval(() => {
+      const bars = root.querySelectorAll('[data-progress]');
+      if (!bars.length) return clearInterval(progressTimer);
+      bars.forEach((el) => {
+        const key = el.dataset.progress;
+        el.querySelector('.bar i').style.width = savedPct(key) + '%';
+        el.querySelector('b').textContent = savedSecs(key) + ' s';
+      });
+    }, 250);
+  };
+
   const loadSaved = async (key) => {
-    if (key === 'tiktok' || key === 'facebook') return;
+    if (key === 'tiktok' || key === 'facebook' || savedCache[key]?.loading) return;
+    savedStart[key] = Date.now();
+    savedCache[key] = { loading: true };
+    if (panel === 'instagram') drawPanel();
+    tickProgress();
     try {
       if (key === 'instagram') {
         const { collections } = await api.igCollections();
@@ -344,6 +367,7 @@ export function renderLibrary(root, libraryId) {
         if (!savedCache[key]) loadSaved(key);
       });
       if (d.open && !savedCache[key]) loadSaved(key);
+      if (savedCache[key]?.loading) tickProgress();
     });
     drawMenu();
   };

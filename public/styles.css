@@ -676,3 +676,6 @@ body.login-mode .topbar { display: none; }
 .tile.renaming .card-rename, .tile.renaming .card-del { visibility: hidden; }
 .name-edit { cursor: text; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; }
 .name-edit:hover { text-decoration: underline dotted color-mix(in srgb, var(--accent) 70%, transparent); text-underline-offset: 3px; }
+.saved-progress { display: grid; gap: 6px; margin: 6px 0 10px; }
+.saved-progress .bar { height: 8px; border-radius: 999px; background: var(--accent-soft); overflow: hidden; }
+.saved-progress .bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #fff)); transition: width 0.25s linear; }
