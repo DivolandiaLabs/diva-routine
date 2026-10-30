@@ -16,6 +16,7 @@ import { openNet, NET_INFO } from './redes.js';
 import { openShare, SHARE_TAG } from './share.js';
 
 const URL_RE = /^https?:\/\//i;
+const PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>';
 // Un link de la propia app (al arrastrar una pestaña o un recuadro) no es algo que importar.
 const ownLink = (u) => {
   try {
@@ -444,7 +445,9 @@ export function renderLibrary(root, libraryId) {
   const visible = () => {
     const q = filters.q.trim().toLowerCase();
     if (q) return { libs: folders().filter((l) => l.name.toLowerCase().includes(q)), vids: state.videos.filter((v) => videoText(v).includes(q)) };
-    return { libs: childFolders(folder?.id || null), vids: videosOf(here()) };
+    // Lo fijado con el pin va primero (en su orden); luego, lo demás.
+    const pinFirst = (list) => [...list.filter((x) => x.pinnedTop), ...list.filter((x) => !x.pinnedTop)];
+    return { libs: pinFirst(childFolders(folder?.id || null)), vids: pinFirst(videosOf(here())) };
   };
 
   const statusHtml = (v) => {
@@ -474,6 +477,7 @@ export function renderLibrary(root, libraryId) {
     return `
       <article class="tile tile-folder" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="true" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
         <label class="sel" title="Seleccionar toda la carpeta para una rutina"><input type="checkbox" data-sel-lib="${l.id}"><b class="order"></b></label>
+        <button class="card-pin${l.pinnedTop ? ' on' : ''}" data-pin-lib="${l.id}" title="${l.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${l.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(l.name)}" aria-pressed="${Boolean(l.pinnedTop)}">${PIN}</button>
         ${lockedIn(l, l.parentId) ? '' : `<button class="card-del" data-del-lib="${l.id}" title="${received ? 'Salir de esta carpeta compartida' : 'Borrar la carpeta y todo lo que tiene'}" aria-label="${received ? 'Salir de' : 'Borrar'} la carpeta ${esc(l.name)}">✕</button>`}
         <a class="tile-thumb" href="#/biblioteca/${l.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((v) => `<span>${videoThumb(v)}</span>`).join('')}</span>`
@@ -488,6 +492,7 @@ export function renderLibrary(root, libraryId) {
   const videoTile = (v, showFolder) => `
     <article class="tile tile-${v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="true">
       <label class="sel" title="Seleccionar para una rutina"><input type="checkbox" data-sel-video="${v.id}"><b class="order"></b></label>
+      <button class="card-pin${v.pinnedTop ? ' on' : ''}" data-pin-video="${v.id}" title="${v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${v.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(v.title)}" aria-pressed="${Boolean(v.pinnedTop)}">${PIN}</button>
       ${lockedIn(v, v.libraryId) ? '' : `<button class="card-del" data-del-video="${v.id}" title="Borrar" aria-label="Borrar ${esc(v.title)}">✕</button>`}
       <a class="tile-thumb" href="#/video/${v.id}">${videoThumb(v)}</a>
       <a class="tile-body" href="#/video/${v.id}">
@@ -531,7 +536,10 @@ export function renderLibrary(root, libraryId) {
     const pinned = !folder && !searching ? state.routines.filter((r) => isPinnedIn(r, shelf.id)) : [];
     $('#count').textContent = `${libs.length ? `${libs.length} carpeta${libs.length === 1 ? '' : 's'} · ` : ''}${vids.length} elemento${vids.length === 1 ? '' : 's'}`;
     $('#grid').innerHTML = pinned.length || libs.length || vids.length
-      ? pinned.map(routineTile).join('') + libs.map(folderTile).join('') + vids.map((v) => videoTile(v, searching)).join('')
+      // Primera línea: rutinas ancladas y lo fijado con el pin; debajo, lo demás.
+      ? pinned.map(routineTile).join('') + libs.filter((l) => l.pinnedTop).map(folderTile).join('') + vids.filter((v) => v.pinnedTop).map((v) => videoTile(v, searching)).join('')
+        + (pinned.length || libs.some((l) => l.pinnedTop) || vids.some((v) => v.pinnedTop) ? '<div class="pin-break" aria-hidden="true"></div>' : '')
+        + libs.filter((l) => !l.pinnedTop).map(folderTile).join('') + vids.filter((v) => !v.pinnedTop).map((v) => videoTile(v, searching)).join('')
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
           <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`;
     drawSelection();
@@ -1202,6 +1210,21 @@ export function renderLibrary(root, libraryId) {
       return;
     }
     // Cambiar el nombre: pulsando el nombre de cualquier recuadro.
+    // Pin: fija (o suelta) la carpeta o el video en la primera línea.
+    const pinBtn = t.closest('[data-pin-lib], [data-pin-video]');
+    if (pinBtn) {
+      e.preventDefault();
+      const isLib = Boolean(pinBtn.dataset.pinLib);
+      const rec = isLib ? libraryById(pinBtn.dataset.pinLib) : videoById(pinBtn.dataset.pinVideo);
+      try {
+        if (isLib) upsert('libraries', await api.updateLibrary(rec.id, { pinnedTop: !rec.pinnedTop }));
+        else upsert('videos', await api.updateVideo(rec.id, { pinnedTop: !rec.pinnedTop }));
+        emit('data');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
     const nameEl = t.closest('[data-name]');
     if (nameEl) {
       e.preventDefault();

@@ -830,7 +830,7 @@ const find = (list, id, what) => {
 const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map((k) => [k, obj[k]]));
 
 // poster: imagen de portada (un fotograma), para la Biblioteca.
-const VIDEO_EDITABLE = ['title', 'titleLocked', 'libraryId', 'notes', 'poster'];
+const VIDEO_EDITABLE = ['title', 'titleLocked', 'libraryId', 'notes', 'poster', 'pinnedTop'];
 // titleLocked/categoryLocked: editados a mano, el análisis ya no los sustituye.
 const EXERCISE_EDITABLE = ['title', 'titleLocked', 'start', 'end', 'mode', 'keyframes', 'technique', 'category', 'categoryLocked', 'notes'];
 // pinned / pinnedIn: la rutina se ve arriba en esas bibliotecas (pinned, de antes: en la principal).
@@ -1392,6 +1392,7 @@ async function handleApi(req, res, parts) {
         lib.nameLocked = true; // nombre tuyo: sincronizar con Instagram ya no lo cambia
       }
       if (body.nameLocked === false) delete lib.nameLocked; // vuelve a seguir el nombre de la colección
+      if ('pinnedTop' in body) body.pinnedTop ? (lib.pinnedTop = true) : delete lib.pinnedTop; // fijada arriba
       await saveDb();
       return send(res, 200, lib);
     }
