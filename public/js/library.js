@@ -137,6 +137,41 @@ export function renderLibrary(root, libraryId) {
   ui.returnToDraw = null;
   let creating = null; // texto de avance mientras se sacan los dibujos
   const pasted = []; // imágenes pegadas en el cuadro de links: { file, url }
+  // Acceso directo a lo anclado (como los mensajes fijados de Telegram): cada clic salta al
+  // siguiente, lo resalta y hace scroll hasta él solo si no se ve ya en pantalla.
+  let pinCursor = -1;
+  // Un scroll suave hecho a mano: `scrollBy({behavior:'smooth'})` no siempre se anima bien
+  // dentro de Electron, así que se anima el propio scrollY fotograma a fotograma. Si se salta
+  // otra vez antes de que termine, esta sustituye a la anterior en vez de pelearse con ella.
+  let scrollGen = 0;
+  const smoothScrollBy = (delta) => {
+    const myGen = ++scrollGen;
+    const from = scrollY;
+    const to = from + delta;
+    const t0 = performance.now();
+    const dur = 380;
+    const ease = (p) => 1 - (1 - p) ** 3;
+    const step = (now) => {
+      if (myGen !== scrollGen) return;
+      const p = Math.min(1, (now - t0) / dur);
+      scrollTo(0, from + (to - from) * ease(p));
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+  const jumpToPinned = () => {
+    const tiles = [...root.querySelectorAll('#grid .tile:has(.card-pin.on)')];
+    if (!tiles.length) return;
+    pinCursor = (pinCursor + 1) % tiles.length;
+    const tile = tiles[pinCursor];
+    tile.classList.remove('pin-flash');
+    void tile.offsetWidth; // reinicia la animación si se vuelve a saltar al mismo
+    tile.classList.add('pin-flash');
+    tile.addEventListener('animationend', () => tile.classList.remove('pin-flash'), { once: true });
+    const barBottom = root.querySelector('.lib-top')?.getBoundingClientRect().bottom || 76;
+    const rect = tile.getBoundingClientRect();
+    if (rect.top < barBottom || rect.bottom > innerHeight) smoothScrollBy(rect.top - barBottom - 10);
+  };
 
   root.innerHTML = `
     <div class="lib2">
@@ -151,6 +186,7 @@ export function renderLibrary(root, libraryId) {
             : shelfTitle()}</nav>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
           <span class="count" id="count"></span>
+          <button class="pin-jump" id="pinJump" data-pin-jump hidden title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
           <label class="sorter" title="Ordenar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>
             <select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
           <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
@@ -618,6 +654,14 @@ export function renderLibrary(root, libraryId) {
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
           <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`;
     drawSelection();
+    const nPinned = items.filter((it) => it.x.pinnedTop).length;
+    const jump = $('#pinJump');
+    if (jump) {
+      jump.hidden = nPinned === 0;
+      jump.querySelector('b').textContent = nPinned > 1 ? nPinned : '';
+      jump.title = jump.ariaLabel = nPinned > 1 ? `Ir a lo anclado (${nPinned})` : 'Ir a lo anclado';
+    }
+    pinCursor = -1;
   };
 
   root.addEventListener('click', (e) => {
@@ -1328,6 +1372,7 @@ export function renderLibrary(root, libraryId) {
       ui.returnToDraw = pick.dataset.pickSeg;
       return;
     }
+    if (t.closest('[data-pin-jump]')) return jumpToPinned();
     const unpin = t.closest('[data-unpin]');
     if (unpin) {
       await pinRoutines([unpin.dataset.unpin], false, shelf.id);

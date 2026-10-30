@@ -127,7 +127,11 @@ input:focus, textarea:focus, select:focus, .btn:focus-visible, .tl:focus-visible
 /* ---------- biblioteca: cuadrícula de recuadros + menú de opciones a la derecha ---------- */
 .lib2 { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: start; }
 .lib-main { position: relative; min-height: 60vh; border-radius: var(--radius); }
-.lib-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; min-height: 44px; flex-wrap: wrap; }
+/* fija (sticky) debajo de la barra superior para que el acceso a lo anclado siga alcanzable al bajar */
+.lib-top {
+  position: sticky; top: 76px; z-index: 5; background: var(--bg);
+  display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; min-height: 44px; flex-wrap: wrap;
+}
 .lib-top input[type="search"] { width: 240px; margin-left: auto; }
 .crumbs { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 220px; }
 .crumbs h2 { font-size: 1.4rem; }
@@ -778,6 +782,19 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 .pin-break { grid-column: 1 / -1; height: 1px; margin: 2px 0; background: linear-gradient(90deg, transparent, var(--line) 15%, var(--line) 85%, transparent); }
 .view-list .card-pin, .view-details .card-pin { top: 50%; transform: translateY(-50%); right: 44px; }
 .view-list .card-pin.on, .view-details .card-pin.on { transform: translateY(-50%) rotate(-20deg); }
+/* acceso directo a lo anclado (como los mensajes fijados de Telegram): salta, resalta y hace scroll */
+.pin-jump {
+  display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 12px; border-radius: 10px;
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); cursor: pointer; flex: none;
+}
+.pin-jump svg { width: 15px; height: 15px; }
+.pin-jump:hover { background: var(--accent); color: #fff; }
+.pin-jump b { font-size: 0.82rem; font-weight: 700; }
+@keyframes pin-flash {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  30% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 65%, transparent); }
+}
+.tile.pin-flash { animation: pin-flash 0.7s ease-out 2; }
 /* organizador: ordenar por fecha, nombre o tipo */
 .sorter { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 10px; height: 36px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); }
 .sorter svg { width: 16px; height: 16px; flex: none; }
