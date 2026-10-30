@@ -1147,6 +1147,19 @@ async function handleApi(req, res, parts) {
 
   // --- cuenta de Instagram (la sesión nunca sale del servidor) ---
   // --- otras redes: YouTube, TikTok, Facebook (la sesión nunca sale del servidor) ---
+  if (resource === 'order' && !id && method === 'POST') {
+    // { items: [{ kind: 'library'|'video', id }] }: el orden propio de lo que hay en un sitio
+    // (carpetas, videos y fotos mezclados), del primero al último.
+    const { items } = await readJson(req);
+    const libraries = [];
+    const videos = [];
+    (Array.isArray(items) ? items : []).forEach((it, i) => {
+      if (it.kind === 'library') libraries.push(Object.assign(find('libraries', it.id, 'Carpeta'), { order: i }));
+      else videos.push(Object.assign(find('videos', it.id, 'Video'), { order: i }));
+    });
+    await saveDb();
+    return send(res, 200, { libraries, videos: videos.map(forClient) });
+  }
   if (resource === 'copy' && !id && method === 'POST') {
     // { videos, folders, target }: copias (con sus archivos) en la carpeta o biblioteca target.
     // Una carpeta se copia entera, con sus subcarpetas. Los dibujos se quedan en el original.

@@ -476,6 +476,15 @@ export function renderLibrary(root, libraryId) {
     const pinFirst = (list) => [...list.filter((x) => x.pinnedTop), ...list.filter((x) => !x.pinnedTop)];
     return { libs: pinFirst(sortList(childFolders(folder?.id || null))), vids: pinFirst(sortList(videosOf(here()))) };
   };
+  // Todo lo de aquí en el orden en que se ve. En «Mi orden», carpetas y videos van mezclados según
+  // los hayas colocado (lo que nunca se colocó: las carpetas antes y luego por fecha).
+  const arranged = () => {
+    const { libs, vids } = visible();
+    const items = [...libs.map((x) => ({ kind: 'library', x })), ...vids.map((x) => ({ kind: 'video', x }))];
+    if (sortBy !== 'custom' || filters.q.trim()) return items;
+    const rank = (it) => it.x.order ?? Infinity;
+    return items.sort((a, b) => rank(a) - rank(b) || (a.kind === b.kind ? String(a.x.createdAt).localeCompare(String(b.x.createdAt)) : a.kind === 'library' ? -1 : 1));
+  };
 
   const statusHtml = (v) => {
     if (jobs.analyzing?.id === v.id) return `<span class="badge b-busy">Analizando ${Math.round(jobs.analyzing.p * 100)}%</span>`;
@@ -562,11 +571,13 @@ export function renderLibrary(root, libraryId) {
     const searching = Boolean(filters.q.trim());
     const pinned = !folder && !searching ? state.routines.filter((r) => isPinnedIn(r, shelf.id)) : [];
     $('#count').textContent = `${libs.length ? `${libs.length} carpeta${libs.length === 1 ? '' : 's'} · ` : ''}${vids.length} elemento${vids.length === 1 ? '' : 's'}`;
-    $('#grid').innerHTML = pinned.length || libs.length || vids.length
+    const items = arranged();
+    const tile = (it) => (it.kind === 'library' ? folderTile(it.x) : videoTile(it.x, searching));
+    $('#grid').innerHTML = pinned.length || items.length
       // Primera línea: rutinas ancladas y lo fijado con el pin; debajo, lo demás.
-      ? pinned.map(routineTile).join('') + libs.filter((l) => l.pinnedTop).map(folderTile).join('') + vids.filter((v) => v.pinnedTop).map((v) => videoTile(v, searching)).join('')
-        + (pinned.length || libs.some((l) => l.pinnedTop) || vids.some((v) => v.pinnedTop) ? '<div class="pin-break" aria-hidden="true"></div>' : '')
-        + libs.filter((l) => !l.pinnedTop).map(folderTile).join('') + vids.filter((v) => !v.pinnedTop).map((v) => videoTile(v, searching)).join('')
+      ? pinned.map(routineTile).join('') + items.filter((it) => it.x.pinnedTop).map(tile).join('')
+        + (pinned.length || items.some((it) => it.x.pinnedTop) ? '<div class="pin-break" aria-hidden="true"></div>' : '')
+        + items.filter((it) => !it.x.pinnedTop).map(tile).join('')
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
           <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`;
     drawSelection();
@@ -899,28 +910,18 @@ export function renderLibrary(root, libraryId) {
   // Una carpeta arrastrada al borde de otra del mismo sitio se coloca antes o después de ella
   // (reordenar); en el centro, se mete dentro.
   let reorderAt = null;
+  // Un elemento (carpeta, video o foto) sobre otro de aquí: va delante o detrás. Sobre una
+  // carpeta, solo en sus bordes (en el centro se mete dentro); sobre un video, según la mitad.
   const reorderOf = (e) => {
-    if (sortBy !== 'custom') return null;
-    // Un video o una foto sobre otro de la misma carpeta: va delante o detrás (según la mitad).
-    if (moving && moving.videos.length === 1 && !moving.folders.length && !filters.q.trim()) {
-      const t = e.target.closest?.('.tile[data-kind="video"]');
-      const dragged = videoById(moving.videos[0]);
-      const over = t && videoById(t.dataset.id);
-      if (!over || over.id === dragged?.id || over.libraryId !== dragged?.libraryId) return null;
-      const r = t.getBoundingClientRect();
-      const rows = ['list', 'details'].includes(view);
-      const f = rows ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
-      return { el: t, id: over.id, after: f > 0.5, video: true };
-    }
-    if (!moving || moving.videos.length || moving.folders.length !== 1) return null;
-    const t = e.target.closest?.('.tile-folder');
-    const dragged = libraryById(moving.folders[0]);
-    const over = t && libraryById(t.dataset.id);
-    if (!over || over.id === dragged.id || (over.parentId || null) !== (dragged.parentId || null) || filters.q.trim()) return null;
+    if (!moving || moving.videos.length + moving.folders.length !== 1 || filters.q.trim()) return null;
+    const t = e.target.closest?.('#grid .tile[data-kind="video"], #grid .tile-folder');
+    const draggedId = moving.videos[0] || moving.folders[0];
+    if (!t || t.dataset.id === draggedId) return null;
     const r = t.getBoundingClientRect();
     const rows = ['list', 'details'].includes(view);
     const f = rows ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
-    return f < 0.3 ? { el: t, id: over.id, after: false } : f > 0.7 ? { el: t, id: over.id, after: true } : null;
+    if (t.dataset.kind === 'library') return f < 0.3 ? { el: t, id: t.dataset.id, after: false } : f > 0.7 ? { el: t, id: t.dataset.id, after: true } : null;
+    return { el: t, id: t.dataset.id, after: f > 0.5 };
   };
   const clearReorder = () => root.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
   root.addEventListener('dragover', (e) => {
@@ -952,32 +953,30 @@ export function renderLibrary(root, libraryId) {
   };
   root.addEventListener('dragend', endMove);
   root.addEventListener('drop', async (e) => {
-    if (reorderAt?.video && moving) {
-      e.preventDefault();
-      const { id, after } = reorderAt;
-      const dragged = moving.videos[0];
-      endMove();
-      const ids = videosOf(videoById(dragged).libraryId).map((v) => v.id).filter((x) => x !== dragged);
-      ids.splice(ids.indexOf(id) + (after ? 1 : 0), 0, dragged);
-      try {
-        const r = await api.orderVideos(ids);
-        r.videos.forEach((v) => upsert('videos', v));
-        emit('data');
-      } catch (err) {
-        toast(err.message, 'error');
-      }
-      return;
-    }
     if (reorderAt && moving) {
+      // Se parte de cómo se ve ahora (sea cual sea el filtro) y queda como «Mi orden».
       e.preventDefault();
       const { id, after } = reorderAt;
-      const dragged = moving.folders[0];
+      const dragged = moving.videos[0] || moving.folders[0];
       endMove();
-      const ids = childFolders(libraryById(dragged).parentId || null).map((l) => l.id).filter((x) => x !== dragged);
-      ids.splice(ids.indexOf(id) + (after ? 1 : 0), 0, dragged);
+      const items = arranged().filter((it) => it.x.id !== dragged).map((it) => ({ kind: it.kind, id: it.x.id }));
+      const at = items.findIndex((it) => it.id === id);
+      items.splice(at + (after ? 1 : 0), 0, { kind: libraryById(dragged) && !videoById(dragged) ? 'library' : 'video', id: dragged });
       try {
-        const r = await api.orderLibraries(ids);
+        const r = await api.orderItems(items);
         r.libraries.forEach((l) => upsert('libraries', l));
+        r.videos.forEach((v) => upsert('videos', v));
+        if (sortBy !== 'custom') {
+          sortBy = 'custom';
+          try {
+            localStorage.setItem('jr-sort', sortBy);
+          } catch {
+            /* solo esta vez */
+          }
+          const sel = root.querySelector('#sortBy');
+          if (sel) sel.value = 'custom';
+          toast('Colocado a mano: ahora se ordena por «Mi orden».');
+        }
         emit('data');
       } catch (err) {
         toast(err.message, 'error');
@@ -1105,7 +1104,6 @@ export function renderLibrary(root, libraryId) {
         /* solo esta vez */
       }
       drawGrid();
-      if (sortBy !== 'custom') toast('Para colocar las cosas a mano arrastrándolas, elige «Mi orden».');
     }
     else if (t.id === 'toRoutine') syncRoutineTarget();
     else if (t.id === 'libName') {

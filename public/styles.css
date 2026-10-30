@@ -787,3 +787,5 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 /* el selector de orden: un solo marco (el de fuera) al pasar el ratón o al elegir */
 .sorter select, .sorter select:hover, .sorter select:focus, .sorter select:focus-visible { border: 0 !important; outline: none !important; box-shadow: none !important; background: transparent !important; }
 .sorter:focus-within { color: var(--accent); border-color: var(--accent); }
+/* recolocar: la barra de color también en carpetas cuando van mezcladas */
+.tile-folder.drop-before::after, .tile-folder.drop-after::after { background: var(--accent); }
