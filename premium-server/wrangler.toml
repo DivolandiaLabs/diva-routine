@@ -1,0 +1,31 @@
+# Servidor Premium de Diva Routine en Cloudflare Workers. No va en el instalador de la app.
+# La clave de Google es un secreto: se guarda con `npx wrangler secret put GEMINI_KEY`, nunca aquí.
+# La de OpenAI, igual: `npx wrangler secret put OPENAI_KEY`.
+name = "diva-routine-premium"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# Crear con `npx wrangler kv namespace create USAGE` y poner aquí su id.
+[[kv_namespaces]]
+binding = "USAGE"
+id = "c25143d6baa841638060b23342211642"
+
+# Licencias de cortesía, bloqueos y estadísticas. La comparte con el panel: ver PANEL.md.
+[[d1_databases]]
+binding = "DB"
+database_name = "diva-routine-admin"
+database_id = "29c69b2c-0140-4ae3-ad4a-34c644fcab34"
+
+# Datos de Lemon Squeezy (no son secretos). Cambian al pasar de modo de prueba a real.
+[vars]
+STORE_ID = "PENDIENTE"
+PRODUCT_ID = "PENDIENTE"
+VARIANT_WEEK = "PENDIENTE"
+VARIANT_MONTH = "PENDIENTE"
+VARIANT_YEAR = "PENDIENTE"
+# Packs de créditos sueltos: producto de pago único con clave de licencia.
+PACK_PRODUCT_ID = "PENDIENTE"
+VARIANT_PACK_100 = "PENDIENTE"
+VARIANT_PACK_200 = "PENDIENTE"
+VARIANT_PACK_500 = "PENDIENTE"
+VARIANT_PACK_1000 = "PENDIENTE"

@@ -1,12 +1,21 @@
 // Biblioteca: cuadrícula de recuadros (carpetas, videos e imágenes) y, a la derecha, el menú de
 // opciones (importar, subir, carpeta nueva, Instagram, seleccionar, rutina, mover, borrar).
 // Cada opción abre su panel entre la cuadrícula y el menú.
-import { api } from './api.js';
+import { api as baseApi, createApi } from './api.js';
+const historyOwner = (() => {
+  try {
+    const id = sessionStorage.getItem('jr-library-undo') || crypto.randomUUID();
+    sessionStorage.setItem('jr-library-undo', id);
+    return id;
+  } catch { return crypto.randomUUID(); }
+})();
+const api = createApi({ 'X-Library-Undo': historyOwner });
+const actionApi = () => createApi({ 'X-Library-Undo': historyOwner, 'X-Library-Undo-Group': crypto.randomUUID() });
 import {
   state, refresh, emit, esc, toast, upsert, libraryById, videoById, exerciseById, videosOf, exercisesOf, videoThumb, PLATFORM,
   jobs, queueDownload, isAnalyzing, canDownload, syncInstagram, linkedLibraries,
   selection, toggleSelected, selectedIndex, selectedVideos, extractSelection, ui, exerciseFigure, pinRoutines,
-  removeVideos, removeLibraries, rootLibrary, folders, topParent, isTop, shelves, shelfName, shelfOf, activeShelf, setActiveShelf, libraryLabel, needsExtraction, fmtTime,
+  removeVideos, removeLibraries, rootLibrary, folders, topParent, isTop, shelves, shelfName, shelfOf, activeShelf, setActiveShelf, libraryLabel, libraryChoices, needsExtraction, fmtTime,
   childFolders, folderPath, videosDeep, descendantIds, moveVideos, moveFolder,
   spaceFor, sharedFolderOf, addedByOther, who, sharedLabel,
   ask, isPinnedIn, routineById,
@@ -14,9 +23,10 @@ import {
 import { openInstagram } from './instagram.js';
 import { openNet, NET_INFO } from './redes.js';
 import { openShare, SHARE_TAG } from './share.js';
+import { VIEWS, VIEW_ICON, SORTS, PIN } from './views.js';
+import { lang, tr } from './i18n.js';
 
 const URL_RE = /^https?:\/\//i;
-const PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>';
 // Un link de la propia app (al arrastrar una pestaña o un recuadro) no es algo que importar.
 const ownLink = (u) => {
   try {
@@ -28,20 +38,11 @@ const ownLink = (u) => {
 };
 const importable = (u) => URL_RE.test(u) && !ownLink(u);
 
-const sq = (x, y, s) => `<rect x="${x}" y="${y}" width="${s}" height="${s}" rx="1.5"/>`;
-const VIEW_ICON = {
-  xl: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${sq(4, 4, 16)}</svg>`,
-  l: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">${sq(3, 3, 8) + sq(13, 3, 8) + sq(3, 13, 8) + sq(13, 13, 8)}</svg>`,
-  m: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">${[3, 10, 17].flatMap((y) => [3, 10, 17].map((x) => sq(x, y, 4.5))).join('')}</svg>`,
-  s: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${[3, 8, 13, 18].flatMap((y) => [3, 8, 13, 18].map((x) => `<rect x="${x}" y="${y}" width="3" height="3" rx="0.6"/>`)).join('')}</svg>`,
-  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><rect x="3" y="4.5" width="3" height="3" rx="0.6"/><rect x="3" y="10.5" width="3" height="3" rx="0.6"/><rect x="3" y="16.5" width="3" height="3" rx="0.6"/></svg>',
-  details: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 5h18M3 10h18M3 15h18M3 20h18M10 3v19"/></svg>',
-};
-
 const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const PENCIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11a2.1 2.1 0 0 0-3-3L5 16z"/></svg>';
 const FOLDER = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>';
 const ICON = {
+  undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   import: svg('<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1 1"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1-1"/>'),
   upload: svg('<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'),
   folder: svg(FOLDER),
@@ -50,24 +51,45 @@ const ICON = {
   selectAll: svg('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>'),
   draw: svg('<path d="M4 20l4-1 11-11a2.1 2.1 0 0 0-3-3L5 16z"/><path d="M14 7l3 3"/>'),
   routine: svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>'),
+  copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>'),
   move: svg(FOLDER + '<path d="M9 13.5h6m-2-2 2 2-2 2"/>'),
   trash: svg('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),
   share: SHARE_TAG,
   social: svg('<circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="m8.3 10.8 7.4-3.6M8.3 13.2l7.4 3.6"/>'),
+  cloud: svg('<path d="M7 18h11.5a3.5 3.5 0 0 0 .5-7 5.5 5.5 0 0 0-10.4-1.6A4.5 4.5 0 0 0 7 18z"/>'),
 };
 // Servicios en la nube: se importa pegando el link compartido de un archivo o una carpeta.
-const CLOUDS = {
+export const CLOUDS = {
   gdrive: { name: 'Google Drive', color: '#1fa463', icon: svg('<path d="M8 3h8l6 10-4 7H6l-4-7z"/><path d="M8 3l6 10H2M16 3 10 13h12M6 20l4-7"/>') },
   dropbox: { name: 'Dropbox', color: '#0061fe', icon: svg('<path d="m7 3-5 3.2L7 9.5l5-3.3zM17 3l-5 3.2 5 3.3 5-3.3zM2 12.8 7 16l5-3.2-5-3.3zM17 9.5l-5 3.3 5 3.2 5-3.2zM7 17.2l5 3.3 5-3.3-5-3.2z"/>') },
   onedrive: { name: 'OneDrive', color: '#0f78d4', icon: svg('<path d="M7 18h11.5a3.5 3.5 0 0 0 .5-7 5.5 5.5 0 0 0-10.4-1.6A4.5 4.5 0 0 0 7 18z"/>') },
   mega: { name: 'MEGA', color: '#d9272e', icon: svg('<circle cx="12" cy="12" r="9"/><path d="M8 15.5V9l4 4 4-4v6.5"/>') },
 };
 
-const NET_ICON = {
+// Iconos de los filtros de tipo (vídeo, rutina, foto, carpeta).
+const HIDE_ICON = {
+  video: svg('<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>'),
+  routine: svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>'),
+  image: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/>'),
+  folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+};
+
+export const NET_ICON = {
   youtube: svg('<rect x="2.5" y="5.5" width="19" height="13" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor"/>'),
   tiktok: svg('<path d="M14 4v10.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M14 4c.5 2.5 2.3 4 5 4"/>'),
   facebook: svg('<path d="M14 8h3V4.5h-3a4 4 0 0 0-4 4V11H7.5v3.5H10V21h3.5v-6.5H17l.5-3.5h-4V9a1 1 0 0 1 1-1z"/>'),
+  x: svg('<path d="M5 4l14 16M19 4 5 20"/>'),
 };
+
+export const SAVED_HINT = {
+  gdrive: 'Tus carpetas de Google Drive, con sus videos y fotos.',
+  instagram: 'Tus colecciones de Guardados, también las privadas.',
+  youtube: 'Tus listas, «Ver más tarde» y «Me gusta».',
+  tiktok: 'Tus colecciones y perfiles.',
+  facebook: 'Tus videos guardados.',
+  x: 'Los videos de tus publicaciones guardadas.',
+};
+export const ICON_IG = ICON.instagram;
 
 export function renderLibrary(root, libraryId) {
   const lib0 = libraryById(libraryId);
@@ -95,15 +117,7 @@ export function renderLibrary(root, libraryId) {
     </nav>`;
   const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${`<button class="shelf-share" data-share-folder="${shelf.id}" title="Compartir esta biblioteca entera" aria-label="Compartir la biblioteca ${esc(shelfName(shelf))}">${SHARE_TAG}${shelfShared(shelf) ? `<span>${spaceFor('folder', shelf.id).members.length}</span>` : ''}</button>`}${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
   // Vistas como en el explorador de archivos (se recuerda la elegida). Ctrl + rueda cambia de una a otra.
-  const VIEWS = [
-    ['xl', 'Iconos muy grandes'], ['l', 'Iconos grandes'], ['m', 'Iconos medianos'],
-    ['s', 'Iconos pequeños'], ['list', 'Lista'], ['details', 'Detalles'],
-  ];
   // Cómo se ordena lo de cada carpeta: el orden propio (arrastrando) o por fecha, nombre o tipo.
-  const SORTS = [
-    ['custom', 'Mi orden'], ['new', 'Más recientes'], ['old', 'Más antiguos'],
-    ['az', 'Nombre A–Z'], ['za', 'Nombre Z–A'], ['type', 'Tipo'],
-  ];
   let sortBy = 'custom';
   try {
     const saved = localStorage.getItem('jr-sort');
@@ -187,23 +201,26 @@ export function renderLibrary(root, libraryId) {
   root.innerHTML = `
     <div class="lib2">
       <section class="lib-main" id="main">
+        <div class="lib-sticky">
         ${shelves().length > 1 || !folder ? shelfBar() : ''}
-        <header class="lib-top">
+        <header class="lib-top lib-bar">
           <nav class="crumbs">${folder
             ? `<a href="#/biblioteca/${shelf.id}" data-drop-lib="${shelf.id}" title="Suelta aquí para sacar a «${esc(shelfName(shelf))}»">${esc(shelfName(shelf))}</a><span>›</span>
                ${folderPath(folder).slice(0, -1).map((a) => `<a href="#/biblioteca/${a.id}" data-drop-lib="${a.id}" title="Suelta aquí para mover a «${esc(a.name)}»">${esc(a.name)}</a><span>›</span>`).join('')}
                <input id="libName" class="title-input" value="${esc(folder.name)}" aria-label="Nombre de la carpeta" title="Haz clic para cambiar el nombre">
                <button class="icon-btn" data-act="rename" title="Cambiar el nombre de la carpeta" aria-label="Cambiar el nombre">${PENCIL}</button>`
             : shelfTitle()}</nav>
+          <span class="count" id="count"></span>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
           <div class="lib-tools">
-            <span class="count" id="count"></span>
             <button class="pin-jump" id="pinJump" data-pin-jump hidden title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
             <label class="sorter" title="Ordenar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>
               <select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
             <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
+            <div class="hide-chips" id="hideChips" role="group" aria-label="Mostrar u ocultar">${[['video', 'Video'], ['routine', 'Rutina'], ['image', 'Foto'], ['folder', 'Carpeta']].map(([k, label]) => `<button class="hide-chip" data-hide="${k}" title="${label}" aria-label="${label}">${HIDE_ICON[k]}</button>`).join('')}</div>
           </div>
         </header>
+        </div>
         <div class="ig-callout" id="igTuto" hidden></div>
         <div class="ig-linked share-bar" id="shareBar" hidden></div>
         <div class="ig-linked" id="igLinked" hidden></div>
@@ -242,6 +259,26 @@ export function renderLibrary(root, libraryId) {
     return selection.length === 1 && selection[0].type === 'library' ? selection[0].id : null;
   };
 
+  let undoCount = 0, undoBusy = false;
+  const updateUndo = async () => {
+    try { undoCount = (await api.libraryUndoStatus()).count; } catch { undoCount = 0; }
+    const button = root.querySelector('[data-menu="undo"]');
+    if (button) button.disabled = undoBusy || !undoCount;
+  };
+  const undoLast = async () => {
+    if (undoBusy || !undoCount) return;
+    undoBusy = true; drawMenu();
+    try {
+      await api.undoLibrary();
+      await refresh();
+      selection.splice(0);
+      emit('data');
+      // Re-render the library tabs and title as well as its grid after a rename/order undo.
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      toast('Cambio deshecho');
+    } catch (err) { toast(err.message, 'error'); }
+    finally { undoBusy = false; await updateUndo(); }
+  };
   const drawMenu = () => {
     const n = selection.length;
     const nVideos = selection.filter((s) => s.type === 'video').length;
@@ -254,7 +291,6 @@ export function renderLibrary(root, libraryId) {
       item('import', 'Importar', { title: 'Pegar links o imágenes' }),
       item('upload', 'Subir', { title: 'Subir videos o fotos del ordenador' }),
       item('newFolder', 'Carpeta', { title: 'Carpeta nueva' }),
-      item('instagram', 'Redes', { icon: ICON.social, title: 'Redes sociales: Instagram, YouTube, TikTok y Facebook' }),
       item('share', 'Compartir', {
         disabled: !target,
         title: target ? `Compartir «${libraryById(target)?.name}» con otras personas (pueden añadir cosas)` : 'Entra en una carpeta (o selecciona una) para compartirla con otras personas',
@@ -262,15 +298,18 @@ export function renderLibrary(root, libraryId) {
       '<span class="opt-sep"></span>',
       item('selectAll', 'Todo', { title: 'Seleccionar o quitar todo lo que se ve' }),
       item('draw', 'Dibujos', { badge: n, ready: n > 0 && panel !== 'draw', title: 'Sacar los dibujos de lo seleccionado (van a Rutinas)' }),
-      item('move', 'Mover', { badge: nVideos, disabled: !nVideos, title: 'Mover los videos seleccionados a otra carpeta' }),
+      item('move', 'Mover', { badge: n, disabled: !n, title: 'Mover lo seleccionado a otra carpeta' }),
+      item('copy', 'Copiar', { badge: n, disabled: !n, title: 'Copiar lo seleccionado en otra carpeta' }),
       item('trash', 'Borrar', { badge: n, disabled: !n, danger: true, title: 'Borrar lo seleccionado' }),
+      item('undo', 'Deshacer', { disabled: undoBusy || !undoCount, title: 'Deshacer el último cambio' }),
     ].join('');
+    updateUndo();
   };
 
   // ---------- paneles ----------
 
   // Todas las carpetas, con su ruta (jszz › giros) y en orden de árbol.
-  const libraryOptions = (selected) => [...shelves(), ...folders().sort((a, b) => libraryLabel(a).localeCompare(libraryLabel(b)))]
+  const libraryOptions = (selected) => libraryChoices()
     .map((l) => `<option value="${l.id}" ${l.id === selected ? 'selected' : ''}>${esc(libraryLabel(l))}</option>`).join('');
 
   const panelHead = (title) => `<header><h3>${title}</h3><button class="x" data-close aria-label="Cerrar">✕</button></header>`;
@@ -280,19 +319,18 @@ export function renderLibrary(root, libraryId) {
   const savedOpen = new Set();
   const savedCache = {};
   const savedChecked = new Set();
-  const SAVED_HINT = {
-    gdrive: 'Tus carpetas de Google Drive, con sus videos y fotos.',
-    instagram: 'Tus colecciones de Guardados, también las privadas.',
-    youtube: 'Tus listas, «Ver más tarde» y «Me gusta».',
-    tiktok: 'Tus colecciones y perfiles.',
-    facebook: 'Tus videos guardados.',
+  // Estas redes no dejan leer la lista de lo guardado: se pega el link.
+  const NO_LIST = {
+    tiktok: 'TikTok no deja ver tus guardados desde fuera: pega el link de una colección o de un perfil.',
+    facebook: 'Facebook no deja ver tus guardados desde fuera: pega el link de cada video.',
+    x: 'X no deja ver tus guardados desde fuera: pega el link de cada publicación con video.',
   };
+  const netsOpen = () => ['instagram', 'cloud'].includes(panel);
   const isImported = (key, id) => state.libraries.some((l) => (key === 'instagram' ? l.igCollections?.some((c) => c.id === id) : key === 'gdrive' ? l.cloudFolders?.some((c) => c.id === id) : l.lists?.some((x) => x.url === id)));
 
   const savedBody = (key) => {
-    if (key === 'tiktok' || key === 'facebook') {
-      // Estas redes no dejan leer la lista de lo guardado: se pega el link.
-      return `<p class="hint">${key === 'tiktok' ? 'TikTok no deja ver tus guardados desde fuera: pega el link de una colección o de un perfil.' : 'Facebook no deja ver tus guardados desde fuera: pega el link de cada video.'}</p>
+    if (NO_LIST[key]) {
+      return `<p class="hint">${NO_LIST[key]}</p>
         <div class="row ig-add"><input id="savedUrl-${key}" placeholder="Pega el link" aria-label="Link de ${NET_INFO[key].name}"><button class="btn small primary" data-saved-url="${key}">Importar</button></div>`;
     }
     const c = savedCache[key];
@@ -327,10 +365,10 @@ export function renderLibrary(root, libraryId) {
   };
 
   const loadSaved = async (key) => {
-    if (key === 'tiktok' || key === 'facebook' || savedCache[key]?.loading) return;
+    if (NO_LIST[key] || savedCache[key]?.loading) return;
     savedStart[key] = Date.now();
     savedCache[key] = { loading: true };
-    if (panel === 'instagram') drawPanel();
+    if (netsOpen()) drawPanel();
     tickProgress();
     try {
       if (key === 'instagram') {
@@ -346,7 +384,7 @@ export function renderLibrary(root, libraryId) {
     } catch (e) {
       savedCache[key] = { error: e.message };
     }
-    if (panel === 'instagram') drawPanel();
+    if (netsOpen()) drawPanel();
   };
 
   const connectDrive = async (btn) => {
@@ -360,7 +398,7 @@ export function renderLibrary(root, libraryId) {
       if (g?.driveRead) {
         state.google = { ...state.google, ...g };
         toast('Google Drive conectado');
-        if (panel === 'instagram') drawPanel();
+        if (netsOpen()) drawPanel();
         return;
       }
     }
@@ -404,7 +442,7 @@ export function renderLibrary(root, libraryId) {
     if (!URL_RE.test(url)) return input.focus();
     btn.disabled = true;
     try {
-      if (key === 'facebook') {
+      if (key === 'facebook' || key === 'x') {
         const r = await api.addLinks([url], here());
         const made = r.created || [];
         made.forEach((v) => upsert('videos', v));
@@ -421,16 +459,46 @@ export function renderLibrary(root, libraryId) {
     }
   };
 
+  const netCard = (key) => {
+    const ig = key === 'instagram';
+    const gd = key === 'gdrive';
+    const n = ig ? { name: 'Instagram', color: '#e1306c' } : gd ? { name: 'Google Drive', color: CLOUDS.gdrive.color } : NET_INFO[key];
+    const on = ig ? state.instagram.connected : gd ? Boolean(state.google?.connected && state.google?.driveRead) : state.social?.[key]?.connected;
+    const expired = ig && state.instagram.expired;
+    const who = ig && state.instagram.username ? ` como <b>@${esc(state.instagram.username)}</b>` : '';
+    const body = on
+      ? `<p class="hint">Conectado${who}.</p>
+         <details class="net-saved" data-saved="${key}" ${savedOpen.has(key) ? 'open' : ''}>
+           <summary>Tus guardados</summary>
+           <div class="saved-body">${savedBody(key)}</div>
+         </details>
+         <button class="btn small ghost danger net-off" data-net-off="${key}">Desconectar</button>`
+      : `<p class="hint">${expired ? 'La sesión caducó: vuelve a conectarla.' : SAVED_HINT[key]}</p>
+         <div class="row"><button class="btn primary small" data-net-connect="${key}">${expired ? 'Volver a conectar' : 'Conectar cuenta'}</button></div>`;
+    return `<section class="net-card" style="--net:${n.color}">
+      <h4>${ig ? ICON.instagram : gd ? CLOUDS.gdrive.icon : NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${body}</section>`;
+  };
+
   const PANELS = {
     import: () => `
       ${panelHead('Importar')}
       <textarea id="links" rows="6" placeholder="Pega aquí links de YouTube, Instagram, TikTok, Google Drive, Dropbox, OneDrive o MEGA (un archivo o una carpeta), una lista de reproducción… o una imagen (clic derecho → Pegar, o Ctrl+V)"></textarea>
+      <p class="hint" id="linkCount"></p>
       <div class="paste-thumbs" id="pasteThumbs"></div>
-      <label class="field">Importar en<select id="target">${libraryOptions(here())}</select></label>
+      <details class="imp-more">
+        <summary>Añadir otro link</summary>
+        <div class="row link-add"><input id="oneLink" placeholder="Pega un link y pulsa Añadir" aria-label="Link"><button class="btn" data-act="add-link">Añadir</button></div>
+      </details>
+      <details class="imp-more">
+        <summary>Importar en <b id="targetName">${esc(libraryLabel(libraryById(here())))}</b></summary>
+        <select id="target" aria-label="Importar en">${libraryOptions(here())}</select>
+      </details>
       <div class="row wrap">
         <button class="btn primary" data-act="import">Importar</button>
         <button class="btn" data-act="upload">Subir archivos…</button>
+        <button class="btn" data-act="target-new" title="Crear una carpeta dentro de la elegida">+ Carpeta</button>
       </div>
+      <div class="row link-add" id="targetNewRow" hidden><input id="targetNew" placeholder="Nombre de la carpeta" aria-label="Nombre de la carpeta"><button class="btn primary" data-act="target-create">Crear</button></div>
       <p class="hint">También puedes arrastrar a la cuadrícula videos, fotos o un .txt con links.${state.ytdlp ? '' : ' Para descargar de YouTube instala <code>yt-dlp</code>.'}</p>`,
 
     newFolder: () => `
@@ -441,36 +509,16 @@ export function renderLibrary(root, libraryId) {
 
     // Redes sociales: sin conectar, un solo botón «Conectar cuenta» (abre el tutorial); conectada,
     // un desplegable con lo que tienes guardado en esa red para marcarlo e importarlo.
-    instagram: () => {
-      const card = (key) => {
-        const ig = key === 'instagram';
-        const gd = key === 'gdrive';
-        const n = ig ? { name: 'Instagram', color: '#e1306c' } : gd ? { name: 'Google Drive', color: CLOUDS.gdrive.color } : NET_INFO[key];
-        const on = ig ? state.instagram.connected : gd ? Boolean(state.google?.connected && state.google?.driveRead) : state.social?.[key]?.connected;
-        const expired = ig && state.instagram.expired;
-        const who = ig && state.instagram.username ? ` como <b>@${esc(state.instagram.username)}</b>` : '';
-        const body = on
-          ? `<p class="hint">Conectado${who}.</p>
-             <details class="net-saved" data-saved="${key}" ${savedOpen.has(key) ? 'open' : ''}>
-               <summary>Tus guardados</summary>
-               <div class="saved-body">${savedBody(key)}</div>
-             </details>
-             <button class="btn small ghost danger net-off" data-net-off="${key}">Desconectar</button>`
-          : `<p class="hint">${expired ? 'La sesión caducó: vuelve a conectarla.' : SAVED_HINT[key]}</p>
-             <div class="row"><button class="btn primary small" data-net-connect="${key}">${expired ? 'Volver a conectar' : 'Conectar cuenta'}</button></div>`;
-        return `<section class="net-card" style="--net:${n.color}">
-          <h4>${ig ? ICON.instagram : gd ? CLOUDS.gdrive.icon : NET_ICON[key]}${n.name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>${body}</section>`;
-      };
-      return `${panelHead('Redes sociales')}
-        ${['instagram', 'youtube', 'tiktok', 'facebook'].map(card).join('')}
-        <h4 class="sh-sub">Nube</h4>
-        ${card('gdrive')}
-        ${['dropbox', 'onedrive', 'mega'].map((key) => `<section class="net-card" style="--net:${CLOUDS[key].color}">
-          <h4>${CLOUDS[key].icon}${CLOUDS[key].name}</h4>
-          <p class="hint">Pega sus links compartidos (de un archivo o de una carpeta) en <b>Importar</b>. Enlazar la cuenta llegará pronto.</p>
-        </section>`).join('')}
-        <p class="hint">Los links compartidos de Google Drive, Dropbox, OneDrive y MEGA se pegan en <b>Importar</b>: una carpeta entra como carpeta nueva, con sus videos y fotos.</p>`;
-    },
+    instagram: () => `${panelHead('Redes sociales')}
+      ${['instagram', 'youtube', 'tiktok', 'facebook', 'x'].map(netCard).join('')}`,
+
+    cloud: () => `${panelHead('Nube')}
+      ${netCard('gdrive')}
+      ${['dropbox', 'onedrive', 'mega'].map((key) => `<section class="net-card" style="--net:${CLOUDS[key].color}">
+        <h4>${CLOUDS[key].icon}${CLOUDS[key].name}</h4>
+        <p class="hint">Pega sus links compartidos (de un archivo o de una carpeta) en <b>Importar</b>. Enlazar la cuenta llegará pronto.</p>
+      </section>`).join('')}
+      <p class="hint">Los links compartidos de Google Drive, Dropbox, OneDrive y MEGA se pegan en <b>Importar</b>: una carpeta entra como carpeta nueva, con sus videos y fotos.</p>`,
 
     draw: () => {
       const videos = selectedVideos();
@@ -499,18 +547,29 @@ export function renderLibrary(root, libraryId) {
         </div>`;
     },
 
-    move: () => {
-      const n = selection.filter((s) => s.type === 'video').length;
-      return `${panelHead('Mover')}
-        <p>${n} video(s) o imagen(es) seleccionado(s).${selection.some((s) => s.type === 'library') ? ' Las carpetas seleccionadas no se mueven.' : ''}</p>
-        <label class="field">A la carpeta<select id="moveTo">${libraryOptions(here())}</select></label>
-        <div class="row"><button class="btn primary" data-act="move" ${n ? '' : 'disabled'}>Mover</button></div>`;
-    },
+    move: () => placePanel('Mover', 'move'),
+    copy: () => placePanel('Copiar', 'copy'),
   };
+
+  function placePanel(title, act) {
+    const n = selection.filter((s) => s.type === 'video' || s.type === 'library').length;
+    return `${panelHead(title)}
+      <p>${tr(`${n} elemento${n === 1 ? '' : 's'}`)}</p>
+      <label class="field">A la carpeta<select id="moveTo">${libraryOptions(here())}</select></label>
+      <div class="row"><button class="btn primary" data-act="${act}" ${n ? '' : 'disabled'}>${title}</button></div>`;
+  }
+
+  // Importar es una ventana: un clic fuera la cierra.
+  root.addEventListener('mousedown', (e) => {
+    if (panel !== 'import' || e.target.closest('#panel, [data-tile-import], [data-menu="import"]')) return;
+    panel = null;
+    drawPanel();
+  });
 
   const drawPanel = () => {
     const box = $('#panel');
     box.hidden = !PANELS[panel];
+    box.classList.toggle('popup', panel === 'import');
     if (box.hidden) return drawMenu();
     // Al repintar se conserva lo que ya estaba escrito o elegido.
     const keep = {};
@@ -634,6 +693,14 @@ export function renderLibrary(root, libraryId) {
       </article>`;
   };
 
+  // Siempre el último recuadro. Sin data-kind: no se selecciona, ni se arrastra, ni cuenta para el orden.
+  const importTile = () => `
+    <button class="tile tile-import" data-tile-import title="Importar links, imágenes o archivos">
+      <span class="ti-plus" aria-hidden="true">+</span>
+      <span>Importar</span>
+      <small>Haz clic o arrastra aquí</small>
+    </button>`;
+
   const setView = (v) => {
     view = v;
     try {
@@ -657,10 +724,10 @@ export function renderLibrary(root, libraryId) {
       `${vids.length} elemento${vids.length === 1 ? '' : 's'}`,
     ].filter(Boolean).join(' · ');
     const tile = (it) => (it.kind === 'library' ? folderTile(it.x) : it.kind === 'routine' ? routineTile(it.x) : videoTile(it.x, searching));
-    $('#grid').innerHTML = items.length
+    $('#grid').innerHTML = (searching ? '' : importTile()) + (items.length
       ? items.map(tile).join('')
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
-          <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`;
+          <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`);
     drawSelection();
     pinCursor = -1;
     setPinLabel([...$('#grid').querySelectorAll('.tile:has(.card-pin.on)')], 0);
@@ -716,7 +783,7 @@ export function renderLibrary(root, libraryId) {
     el.innerHTML = `<span>Sincronizada con ${[
       ...cols.map((c) => `<b class="ig-col-link">«${esc(c.name)}» <small>(Instagram)</small><button class="row-del" data-unlink="${esc(c.id)}" title="Dejar de sincronizar «${esc(c.name)}» (lo importado se queda)" aria-label="Dejar de sincronizar ${esc(c.name)}">✕</button></b>`),
       ...lists.map((x) => `<b class="ig-col-link">«${esc(x.name)}» <small>(${netName(x.url)})</small><button class="row-del" data-unlink-list="${esc(x.url)}" title="Dejar de sincronizar «${esc(x.name)}» (lo importado se queda)" aria-label="Dejar de sincronizar ${esc(x.name)}">✕</button></b>`),
-    ].join(', ')}${last ? ` · última vez ${new Date(last).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}` : ''}</span>
+    ].join(', ')}${last ? ` · última vez ${new Date(last).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'short' })}` : ''}</span>
       ${cols.length === 1 && !lists.length && lib.nameLocked && lib.name !== lib.igCollections[0].name
         ? `<button class="btn small ghost" data-ig-name="${esc(lib.igCollections[0].name)}" title="La carpeta volverá a llamarse como la colección (y a cambiar si la renombras en Instagram)">Usar el nombre de Instagram</button>` : ''}
       <button class="btn small" data-act="ig-sync">Sincronizar</button>`;
@@ -729,8 +796,8 @@ export function renderLibrary(root, libraryId) {
     el.hidden = !sp;
     if (!sp) return;
     const top = libraryById(sp.rootId);
-    el.innerHTML = `<span>${SHARE_TAG}${esc(sharedLabel(sp))}${sp.rootId !== folder.id ? ` (desde «${esc(top?.name || sp.name)}»)` : ''}.
-      ${sp.mine ? 'Pueden añadir cosas aquí.' : 'Puedes añadir cosas; lo de los demás solo lo quitan ellos o quien la comparte.'}</span>
+    el.innerHTML = `<span>${SHARE_TAG}${esc(tr(sharedLabel(sp)))}${sp.rootId !== folder.id ? ` ${esc(tr(`(desde «${top?.name || sp.name}»)`))}` : ''}.
+      ${tr(sp.mine ? 'Pueden añadir cosas aquí.' : 'Puedes añadir cosas; lo de los demás solo lo quitan ellos o quien la comparte.')}</span>
       <button class="btn small" data-share-folder="${sp.rootId}">${sp.mine ? 'Gestionar' : 'Ver quién está'}</button>`;
   };
 
@@ -800,8 +867,8 @@ export function renderLibrary(root, libraryId) {
     if (!box) return;
     box.innerHTML = pasted.map((p, i) => `<figure><img src="${p.url}" alt="Imagen pegada ${i + 1}"><button class="x" data-unpaste="${i}" title="Quitar">✕</button></figure>`).join('');
     const urls = ($('#links')?.value || '').split(/\s+/).filter(importable).length;
-    const parts = [urls && `${urls} link${urls === 1 ? '' : 's'}`, pasted.length && `${pasted.length} imagen${pasted.length === 1 ? '' : 'es'}`].filter(Boolean);
-    $('[data-act="import"]').textContent = parts.length ? `Importar ${parts.join(' y ')}` : 'Importar';
+    const parts = [urls && `${urls} link${urls === 1 ? '' : 's'}`, pasted.length && `${pasted.length} imagen${pasted.length === 1 ? '' : 'es'}`].filter(Boolean).map(tr);
+    $('[data-act="import"]').textContent = parts.length ? `Importar ${parts.join(` ${tr('y')} `)}` : 'Importar';
   };
 
   const clearPasted = (i = null) => {
@@ -826,6 +893,41 @@ export function renderLibrary(root, libraryId) {
 
   // Links de Google Drive, Dropbox, OneDrive o MEGA (un archivo o una carpeta entera).
   const CLOUD_RE = /drive\.google\.com|docs\.google\.com|dropbox\.com|1drv\.ms|onedrive\.live\.com|sharepoint\.com|mega\.nz|mega\.co\.nz/i;
+  // Varios links: se van añadiendo al cuadro, uno por línea, y se importan todos a la vez.
+  function addLink() {
+    const link = $('#oneLink').value.trim();
+    if (!link) return $('#oneLink').focus();
+    const box = $('#links');
+    box.value = `${box.value.trim()}\n${link}`.trim();
+    $('#oneLink').value = '';
+    $('#oneLink').focus();
+    countLinks();
+  }
+  function countLinks() {
+    const n = $('#links')?.value.split(/\s+/).filter(importable).length || 0;
+    const out = $('#linkCount');
+    if (out) out.textContent = n ? tr(`${n} link${n === 1 ? '' : 's'} para importar`) : '';
+  }
+
+  // Carpeta nueva dentro de la elegida en «Importar en», que pasa a ser el destino.
+  async function createTarget() {
+    const name = $('#targetNew').value.trim();
+    if (!name) return $('#targetNew').focus();
+    const parent = libraryById($('#target').value);
+    try {
+      const lib = upsert('libraries', await api.createLibrary(name, parent?.root ? null : parent?.id || null));
+      $('#target').innerHTML = libraryOptions(lib.id);
+      $('#target').value = lib.id;
+      $('#targetNew').value = '';
+      $('#targetName').textContent = libraryLabel(lib);
+      $('#targetNewRow').hidden = true;
+      emit('data');
+      toast(`Carpeta «${lib.name}» creada`);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
   async function importAll() {
     const all = $('#links').value.split(/\s+/).filter(importable);
     const clouds = all.filter((u) => CLOUD_RE.test(u));
@@ -1172,22 +1274,23 @@ export function renderLibrary(root, libraryId) {
   };
 
   // Llevar a otra carpeta o biblioteca: se elige mover o copiar.
-  const moveOrCopy = async (target, videos, libs, x, y) => {
-    const how = await askCopyOrMove(x, y);
+  const moveOrCopy = async (target, videos, libs, x, y, chosen = null) => {
+    const how = chosen || await askCopyOrMove(x, y);
     if (!how) return;
     const where = target ? libraryLabel(libraryById(target)) : shelfName(rootLibrary());
     const n = videos.length + libs.length;
     try {
+      const client = actionApi();
       if (how === 'copy') {
-        const r = await api.copyItems(videos, libs, target || rootLibrary().id);
+        const r = await client.copyItems(videos, libs, target || rootLibrary().id);
         r.libraries.forEach((l) => upsert('libraries', l));
         r.videos.forEach((v) => upsert('videos', v));
         emit('data');
         queueDownload(r.videos.filter((v) => !v.source.file && canDownload(v)).map((v) => v.id));
         return toast(`${n === 1 ? 'Copiado' : `${n} copiados`} en «${where}»`);
       }
-      if (videos.length) await moveVideos(videos, target || rootLibrary().id);
-      for (const id of libs) await moveFolder(id, target);
+      if (videos.length) await moveVideos(videos, target || rootLibrary().id, client);
+      for (const id of libs) await moveFolder(id, target, client);
       // Lo movido ya no está aquí: sale de la selección.
       for (let i = selection.length - 1; i >= 0; i--) if ([...videos, ...libs].includes(selection[i].id)) selection.splice(i, 1);
       emit('selection');
@@ -1230,10 +1333,10 @@ export function renderLibrary(root, libraryId) {
   async function deleteItems(libs, videos) {
     const n = libs.reduce((a, l) => a + videosDeep(l.id).length, 0);
     const subs = libs.reduce((a, l) => a + descendantIds(l.id).length, 0);
-    const inside = [subs && `${subs} subcarpeta${subs === 1 ? '' : 's'}`, n && `${n} elemento${n === 1 ? '' : 's'}`].filter(Boolean);
+    const inside = [subs && `${subs} subcarpeta${subs === 1 ? '' : 's'}`, n && `${n} elemento${n === 1 ? '' : 's'}`].filter(Boolean).map(tr);
     const parts = [];
-    if (videos.length) parts.push(videos.length === 1 ? `«${videos[0].title}»` : `${videos.length} elementos`);
-    if (libs.length) parts.push(`${libs.length === 1 ? `la carpeta «${libs[0].name}»` : `${libs.length} carpetas`}${inside.length ? ` (con ${inside.join(' y ')} dentro)` : ''}`);
+    if (videos.length) parts.push(videos.length === 1 ? `«${videos[0].title}»` : tr(`${videos.length} elementos`));
+    if (libs.length) parts.push(`${tr(libs.length === 1 ? `la carpeta «${libs[0].name}»` : `${libs.length} carpetas`)}${inside.length ? ` ${tr(`(con ${inside.join(` ${tr('y')} `)} dentro)`)}` : ''}`);
     if (!parts.length) return;
     // Carpetas que te compartieron: no se borran para nadie, sales de ellas.
     const leaving = libs.filter((l) => spaceFor('folder', l.id) && !spaceFor('folder', l.id).mine);
@@ -1250,12 +1353,14 @@ export function renderLibrary(root, libraryId) {
       }
       return;
     }
-    const sharing = libs.some((l) => spaceFor('folder', l.id)?.mine);
-    if (!await ask(`¿Borrar ${parts.join(' y ')}? Sus ejercicios también saldrán de las rutinas.${sharing ? ' Las personas con quienes la compartes dejarán de verla.' : ''} No se puede deshacer.`)) return;
+    const sharing = libs.some((l) => [l.id, ...descendantIds(l.id)].some(id => spaceFor('folder', id)));
+    const undoable = !sharing && !leaving.length;
+    if (!await ask(`¿Borrar ${parts.join(` ${tr('y')} `)}? Sus ejercicios también saldrán de las rutinas.${sharing ? ' Las personas con quienes la compartes dejarán de verla.' : ''} ${tr(undoable ? 'Puedes deshacerlo hasta cerrar la app.' : 'No se puede deshacer.')}`)) return;
     try {
-      await removeVideos(videos.map((v) => v.id));
-      await removeLibraries(libs.map((l) => l.id));
-      toast(`Borrado: ${parts.join(' y ')}`);
+      const client = undoable ? actionApi() : baseApi;
+      await removeVideos(videos.map((v) => v.id), client);
+      await removeLibraries(libs.map((l) => l.id), client);
+      toast(`Borrado: ${parts.join(` ${tr('y')} `)}`);
       if (folder && !libraryById(folder.id)) location.hash = '#/biblioteca';
     } catch (err) {
       toast(err.message, 'error');
@@ -1294,7 +1399,8 @@ export function renderLibrary(root, libraryId) {
   });
 
   root.addEventListener('input', (e) => {
-    if (e.target.id === 'links') drawPasted();
+    if (e.target.id === 'links') (drawPasted(), countLinks());
+    if (e.target.id === 'target') $('#targetName').textContent = libraryLabel(libraryById(e.target.value));
   });
 
   root.addEventListener('keydown', async (e) => {
@@ -1312,6 +1418,12 @@ export function renderLibrary(root, libraryId) {
     emit('data');
     toast(`Carpeta «${lib.name}» creada`);
   }
+
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (e.target.id === 'oneLink') (e.preventDefault(), addLink());
+    else if (e.target.id === 'targetNew') (e.preventDefault(), createTarget());
+  });
 
   const onKey = (e) => {
     if (e.key === 'Escape' && panel && !document.querySelector('dialog[open]')) ((panel = null), drawPanel());
@@ -1375,9 +1487,10 @@ export function renderLibrary(root, libraryId) {
       return;
     }
     if (t.closest('[data-pin-jump]')) return jumpToPinned();
+    if (t.closest('[data-tile-import]')) return panel === 'import' ? $('#links').focus() : openPanel('import');
     const unpin = t.closest('[data-unpin]');
     if (unpin) {
-      await pinRoutines([unpin.dataset.unpin], false, shelf.id);
+      await pinRoutines([unpin.dataset.unpin], false, shelf.id, api);
       return toast(`Rutina quitada de «${shelfName(shelf)}» (sigue en Rutinas)`);
     }
     const delVideo = t.closest('[data-del-video]');
@@ -1397,7 +1510,7 @@ export function renderLibrary(root, libraryId) {
     if (t.closest('[data-shelf-add]')) {
       e.preventDefault();
       try {
-        const l = upsert('libraries', await api.createShelf('Nueva biblioteca'));
+        const l = upsert('libraries', await api.createShelf(tr('Nueva biblioteca')));
         // Al día ya: así la app no se repinta sola a los pocos segundos mientras escribes el nombre.
         await refresh();
         setActiveShelf(l.id);
@@ -1418,9 +1531,10 @@ export function renderLibrary(root, libraryId) {
     if (shelfDel) {
       e.preventDefault();
       const l = libraryById(shelfDel.dataset.shelfDel);
-      if (!await ask(`¿Borrar la biblioteca «${shelfName(l)}» con todas sus carpetas, videos y fotos? No se puede deshacer.`)) return;
+      const undoable = ![l.id, ...descendantIds(l.id)].some(id => spaceFor('folder', id));
+      if (!await ask(`¿Borrar la biblioteca «${shelfName(l)}» con todas sus carpetas, videos y fotos? ${tr(undoable ? 'Puedes deshacerlo hasta cerrar la app.' : 'No se puede deshacer.')}`)) return;
       try {
-        await removeLibraries([l.id]);
+        await removeLibraries([l.id], undoable ? actionApi() : baseApi);
         setActiveShelf('');
         location.hash = '#/biblioteca';
       } catch (err) {
@@ -1519,6 +1633,7 @@ export function renderLibrary(root, libraryId) {
       for (const [k, id] of items) if (all === selectedIndex(k, id) >= 0) toggleSelected(k, id);
       return;
     }
+    if (menu === 'undo') return undoLast();
     if (menu === 'trash') {
       const libs = selection.filter((s) => s.type === 'library').map((s) => libraryById(s.id)).filter(Boolean);
       const videos = selection
@@ -1533,6 +1648,11 @@ export function renderLibrary(root, libraryId) {
     if (!el) return;
     const act = el.dataset.act;
     if (act === 'import') importAll();
+    else if (act === 'add-link') addLink();
+    else if (act === 'target-new') {
+      $('#targetNewRow').hidden = false;
+      $('#targetNew').focus();
+    } else if (act === 'target-create') createTarget();
     else if (act === 'upload') $('#files').click();
     else if (act === 'new-lib') createFolder();
     else if (act === 'ig-connect') openInstagram({ view: 'connect' });
@@ -1568,21 +1688,15 @@ export function renderLibrary(root, libraryId) {
     } else if (act === 'clear-sel') {
       selection.length = 0;
       emit('selection');
-    } else if (act === 'move') {
+    } else if (act === 'move' || act === 'copy') {
       const to = $('#moveTo').value;
-      const ids = selection.filter((s) => s.type === 'video').map((s) => s.id);
+      const videos = selection.filter((s) => s.type === 'video').map((s) => s.id);
+      const libs = selection.filter((s) => s.type === 'library').map((s) => s.id);
+      if (act === 'move' && libs.some((f) => f === to || descendantIds(f).includes(to))) return toast('Una carpeta no puede ir dentro de sí misma', 'error');
       el.disabled = true;
-      try {
-        for (const id of ids) upsert('videos', await api.updateVideo(id, { libraryId: to }));
-        for (let i = selection.length - 1; i >= 0; i--) if (selection[i].type === 'video') selection.splice(i, 1);
-        panel = null;
-        emit('data');
-        emit('selection');
-        toast(`${ids.length} movido(s) a «${libraryLabel(libraryById(to))}»`);
-      } catch (err) {
-        toast(err.message, 'error');
-        el.disabled = false;
-      }
+      await moveOrCopy(to === rootLibrary().id ? null : to, videos, libs, 0, 0, act);
+      panel = null;
+      emit('selection');
     } else if (act === 'extract') {
       const setStatus = (s) => {
         creating = s;
@@ -1606,6 +1720,35 @@ export function renderLibrary(root, libraryId) {
     }
   });
 
+  // Filtros: lo iluminado se ve. Se recuerda entre vistas.
+  const hideKinds = (() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem('jr-hide-kinds')) || []);
+    } catch {
+      return new Set();
+    }
+  })();
+  const drawHide = () => {
+    root.querySelectorAll('.hide-chip').forEach((b) => {
+      const hidden = hideKinds.has(b.dataset.hide);
+      b.classList.toggle('on', !hidden);
+      b.setAttribute('aria-pressed', !hidden);
+      root.classList.toggle(`hide-${b.dataset.hide}`, hidden);
+    });
+  };
+  $('#hideChips').addEventListener('click', (e) => {
+    const k = e.target.closest('[data-hide]')?.dataset.hide;
+    if (!k) return;
+    if (!hideKinds.delete(k)) hideKinds.add(k);
+    try {
+      localStorage.setItem('jr-hide-kinds', JSON.stringify([...hideKinds]));
+    } catch {
+      /* solo esta vez */
+    }
+    drawHide();
+  });
+  drawHide();
+
   $('#q').addEventListener('input', (e) => ((filters.q = e.target.value), drawGrid()));
 
   const onStore = (e) => {
@@ -1619,7 +1762,7 @@ export function renderLibrary(root, libraryId) {
       drawIgTuto();
       drawShared();
       drawLinked();
-      if (['instagram', 'draw', 'move'].includes(panel)) drawPanel();
+      if (['instagram', 'cloud', 'draw', 'move', 'copy'].includes(panel)) drawPanel();
       else drawMenu();
     } else if (kind === 'poster') {
       // Llegó la portada de un video: se cambia solo su miniatura (y el mosaico de las carpetas).
@@ -1630,7 +1773,7 @@ export function renderLibrary(root, libraryId) {
     } else if (kind === 'job') drawStatus();
     else if (kind === 'selection') {
       drawSelection();
-      if (['draw', 'move'].includes(panel)) drawPanel();
+      if (['draw', 'move', 'copy'].includes(panel)) drawPanel();
       else drawMenu();
     }
   };

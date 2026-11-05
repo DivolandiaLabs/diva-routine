@@ -88,6 +88,21 @@ export async function captureFrames(src, times, height = 54) {
   return out;
 }
 
+/** Un fotograma a tamaño real, en JPEG. */
+export async function frameBlob(src, t) {
+  const v = await loadVideo(src);
+  await seek(v, t);
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth;
+  c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.92));
+  const aspect = c.width / c.height;
+  v.removeAttribute('src');
+  v.load();
+  return { blob, aspect };
+}
+
 /** Portada del video: un fotograma (hacia el segundo 1) en JPEG. */
 export async function capturePoster(src, height = 480) {
   const v = await loadVideo(src);
@@ -136,6 +151,22 @@ export function loadImage(src) {
     img.onerror = () => reject(new Error('No se pudo abrir la imagen'));
     img.src = src;
   });
+}
+
+/** La pose en los instantes elegidos a mano. Los fotogramas sin persona no se devuelven. */
+export async function posesAt(src, times, onProgress) {
+  await getLandmarker();
+  const video = await loadVideo(src);
+  const frames = [];
+  for (const [i, t] of times.entries()) {
+    await seek(video, t);
+    const pose = await detectPose(video);
+    if (pose) frames.push({ t: Math.round(t * 100) / 100, ...pose });
+    onProgress?.((i + 1) / times.length);
+  }
+  video.removeAttribute('src');
+  video.load();
+  return frames;
 }
 
 /**

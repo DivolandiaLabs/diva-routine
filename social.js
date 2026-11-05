@@ -1,4 +1,4 @@
-// Otras redes sociales (YouTube, TikTok, Facebook): conectar tu cuenta pegando tu sesión
+// Otras redes sociales (YouTube, TikTok, Facebook, X): conectar tu cuenta pegando tu sesión
 // (las cookies de la web, como con Instagram) para importar tus listas y descargar videos que
 // piden cuenta. Todo va por yt-dlp con un archivo de cookies temporal. Las sesiones se guardan
 // solo en este ordenador (data/redes.json) y solo se envían a su red.
@@ -10,6 +10,7 @@ export const NETS = {
   youtube: { name: 'YouTube', domain: 'youtube.com', need: [['SAPISID', '__Secure-3PAPISID']], home: 'https://www.youtube.com/' },
   tiktok: { name: 'TikTok', domain: 'tiktok.com', need: [['sessionid', 'sessionid_ss']], home: 'https://www.tiktok.com/' },
   facebook: { name: 'Facebook', domain: 'facebook.com', need: [['c_user'], ['xs']], home: 'https://www.facebook.com/' },
+  x: { name: 'X', domain: 'x.com', need: [['auth_token'], ['ct0']], home: 'https://x.com/' },
 };
 
 let FILE;
@@ -28,12 +29,22 @@ export function initSocial(localDir) {
 const save = () => fsp.writeFile(FILE, JSON.stringify(saved, null, 2));
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
+// Por el nombre del servidor: «x.com» también es el final de netflix.com o dropbox.com.
+function isX(u) {
+  try {
+    return /(^|\.)(x|twitter)\.com$/.test(new URL(/^https?:/.test(u) ? u : `https://${u}`).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Red de un link (solo las de aquí). */
 export function netOf(url) {
   const u = String(url || '').toLowerCase();
   if (/youtube\.com|youtu\.be/.test(u)) return 'youtube';
   if (/tiktok\.com/.test(u)) return 'tiktok';
   if (/facebook\.com|fb\.watch/.test(u)) return 'facebook';
+  if (isX(u)) return 'x';
   return null;
 }
 
@@ -43,7 +54,10 @@ export const status = () => Object.fromEntries(Object.keys(NETS).map((n) => [n, 
 /** Lee lo pegado: la cabecera «cookie: a=b; c=d», un cookies.txt o un JSON de una extensión. */
 function readCookies(net, raw) {
   const text = String(raw || '').trim().replace(/^cookie:\s*/i, '');
-  const mine = (d) => String(d || NETS[net].domain).replace(/^\./, '').toLowerCase().endsWith(NETS[net].domain);
+  const mine = (d) => {
+    const host = String(d || NETS[net].domain).replace(/^\./, '').toLowerCase();
+    return host === NETS[net].domain || host.endsWith(`.${NETS[net].domain}`);
+  };
   const jar = {};
   if (/^[[{]/.test(text)) {
     try {

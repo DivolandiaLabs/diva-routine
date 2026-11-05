@@ -4,11 +4,12 @@ import { api } from './api.js';
 import { phasesSVG } from './figure.js';
 import { detectPose, captureFrames } from './pose.js';
 import { labelPose } from './analysis.js';
+import { tr } from './i18n.js';
 import {
   state, refresh, emit, esc, toast, fmtTime, parseTime, debounce, upsert,
-  videoById, libraryById, libraryLabel, isTop, shelfName, exercisesOf, exerciseById, PLATFORM, CATEGORIES, youtubeId,
+  videoById, libraryById, libraryLabel, libraryChoices, isTop, shelfName, exercisesOf, exerciseById, PLATFORM, CATEGORIES, youtubeId,
   jobs, queueDownload, queueAnalysis, isAnalyzing, manualExtract, canDownload, removeVideos, ui,
-  ask,
+  usedInRoutines, foldedAi, ask, styleTiles, modelPicker, chooseAi, framesExtract, imageExtract, improveWithAi, CROWN,
 } from './store.js';
 
 function embedUrl(src) {
@@ -45,7 +46,7 @@ export function renderVideo(root, id) {
     <div class="vhead">
       <a href="#/biblioteca/${v.libraryId}" class="back">← ${esc(lib && !isTop(lib) ? lib.name : shelfName(lib))}</a>
       <input id="vtitle" class="title-input" value="${esc(v.title)}" aria-label="Nombre del video">
-      <select id="vlib" title="Mover a otra carpeta">${state.libraries.map((l) => `<option value="${l.id}" ${l.id === v.libraryId ? 'selected' : ''}>${esc(libraryLabel(l))}</option>`).join('')}</select>
+      <select id="vlib" title="Mover a otra carpeta">${libraryChoices().map((l) => `<option value="${l.id}" ${l.id === v.libraryId ? 'selected' : ''}>${esc(libraryLabel(l))}</option>`).join('')}</select>
       <button class="btn small ghost danger" data-act="del-video">Eliminar</button>
     </div>
     <div class="vgrid">
@@ -92,16 +93,33 @@ export function renderVideo(root, id) {
             </div>
             <div class="seg-preview">
               <div class="sp-head"><b>Vista previa del tramo</b><span class="hint" id="spInfo"></span></div>
+              <div class="views sp-mode" role="group" aria-label="Modo de sacar los dibujos">
+                <button class="view-btn" data-act="mode" data-mode="manual">Manual</button>
+                <button class="view-btn" data-act="mode" data-mode="auto">Automático</button>
+              </div>
               <div class="sp-frames" id="spFrames"></div>
+              <label class="sp-count"><span>Fotogramas</span><input type="range" id="spCount" min="2" max="12" step="1" value="6" aria-label="Número de fotogramas"><b id="spCountN">6</b></label>
             </div>
           </div>` : ''}
         ${v.source.file ? `
           <div class="extract">
-            ${isVideo ? '<button class="btn primary" data-act="mark-seg">Marcar este tramo</button>' : ''}
-            <button class="btn ${isVideo ? 'ghost' : 'primary'}" data-act="auto">${isVideo ? 'Sacar dibujos de todo el video (IA)' : 'Sacar dibujo'}</button>
-            ${isVideo ? `<label class="inline">Fases por ejercicio <select id="kcount">${[2, 3, 4, 5, 6].map((n) => `<option ${n === 4 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>` : ''}
+            ${isVideo ? `<button class="btn primary" data-act="make-frames" data-only="manual" id="mkFrames" disabled>Crear viñetas</button>
+              <button class="btn primary" data-act="process-seg" data-only="auto">Procesar este tramo</button>
+              <button class="btn" data-act="mark-seg" data-only="auto">Marcar para más tarde</button>` : ''}
+            <button class="btn ${isVideo ? 'ghost' : 'primary'}" data-act="auto">${isVideo ? 'Sacar dibujos de todo el video' : 'Sacar dibujo'}</button>
+            ${modelPicker()}
+            ${isVideo ? `<label class="inline" data-only="auto">Fases por ejercicio <select id="kcount">${[2, 3, 4, 5, 6].map((n) => `<option ${n === 4 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>` : ''}
+            ${isVideo ? `<span class="info-tip" tabindex="0" role="button" aria-label="Ayuda">?<span class="info-pop"><p class="hint" data-only="manual"><b>Modo manual:</b> elige el tramo en el timeline y haz clic en los fotogramas que quieras; cada uno será una viñeta del mismo ejercicio. Pulsa <b>Crear viñetas</b>. Al cambiar el tramo o el número de fotogramas se empieza de nuevo. Teclas: ← → mueven 0,1 s (con Mayús 1 s), I / O marcan inicio y fin, espacio reproduce.</p>
+          <p class="hint" data-only="auto"><b>Modo automático:</b> elige el tramo y pulsa <b>Procesar este tramo</b>: el análisis decide las fases. Con <b>Marcar para más tarde</b> los dibujos se sacan al crear la rutina; sin tramos marcados, el video se separa en ejercicios solo. Teclas: ← → mueven 0,1 s (con Mayús 1 s), I / O marcan inicio y fin, espacio reproduce.</p></span></span>` : ''}
           </div>
-          ${isVideo ? '<p class="hint">Elige el tramo exacto del ejercicio: arrastra en el timeline (o mueve las asas), afina con los tiempos y pulsa <b>Marcar este tramo</b>. Los dibujos de ese tramo se sacan al crear la rutina; sin tramos marcados, la IA separa el video en ejercicios ella sola. Teclas: ← → mueven 0,1 s (con Mayús 1 s), I / O marcan inicio y fin, espacio reproduce.</p>' : ''}
+          <details class="ai-box" ${foldedAi() ? '' : 'open'}>
+            <summary>${CROWN}Instrucciones para la IA <small>(opcional)</small></summary>
+            <label class="field sp-prompt">
+              <textarea id="spPrompt" aria-label="Instrucciones para la IA" rows="2" maxlength="500" placeholder="Ej.: es un plié con la espalda recta; ponle ropa de ballet" ${state.ai?.premium ? '' : 'disabled'}></textarea></label>
+            ${modelPicker('promptModel')}
+            <small class="hint">Función Premium: gasta créditos. Se aplican con el estilo de viñeta elegido y se guardan con el dibujo.</small>
+          </details>
+          ${styleTiles()}
           <div class="progress" id="progress" hidden><div class="bar"><div id="bar"></div></div><span id="progText"></span></div>` : ''}
       </section>
       <section class="vex-col">
@@ -117,6 +135,7 @@ export function renderVideo(root, id) {
   const video = $('#video');
   let activeId = null; // ejercicio resaltado
   let busyManual = false;
+  let shownOnly = null; // mientras la IA dibuja: los que se ven; el dibujo base no se enseña
 
   // ---------- sin archivo (solo link) ----------
 
@@ -162,26 +181,67 @@ export function renderVideo(root, id) {
     drawPreview();
   }
 
+  // Dos formas de sacar los dibujos: elegir los fotogramas a mano o dejar que el análisis procese el tramo.
+  let mode = 'manual';
+  try {
+    if (localStorage.getItem('jr-extract-mode') === 'auto') mode = 'auto';
+  } catch {
+    /* sin almacenamiento: el modo manual */
+  }
+  const picked = new Set(); // instantes elegidos en el modo manual
+  // Cuántos fotogramas se ven: lo marca la barra de debajo de la vista previa.
+  let previewN = 6;
+  try {
+    const saved = Number(localStorage.getItem('jr-preview-frames'));
+    if (saved >= 2 && saved <= 12) previewN = saved;
+  } catch {
+    /* sin almacenamiento: los de siempre */
+  }
+  if ($('#spCount')) {
+    $('#spCount').value = previewN;
+    $('#spCountN').textContent = previewN;
+  }
+  const drawPicks = () => {
+    const order = [...picked].sort((a, b) => a - b);
+    root.querySelectorAll('#spFrames [data-seek]').forEach((f) => {
+      const i = order.indexOf(Number(f.dataset.seek));
+      f.classList.toggle('picked', i >= 0);
+      f.querySelector('.sp-n').textContent = i >= 0 ? i + 1 : '';
+    });
+    const btn = $('#mkFrames');
+    if (!btn) return;
+    btn.disabled = !picked.size || Boolean(busyManual);
+    btn.textContent = picked.size ? `Crear ${picked.size === 1 ? '1 viñeta' : `${picked.size} viñetas`}` : 'Crear viñetas';
+  };
+  const applyMode = () => {
+    root.querySelectorAll('[data-only]').forEach((el) => (el.hidden = el.dataset.only !== mode));
+    root.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+    $('#spFrames')?.classList.toggle('manual', mode === 'manual');
+  };
+  applyMode();
+
   // Vista previa del tramo: sus fotogramas, de inicio a fin, en grande (de ahí salen los dibujos).
-  const PREVIEW_N = 6;
   let previewToken = 0;
   const drawPreview = debounce(async () => {
     const box = $('#spFrames');
     if (!box || !tl.sel || !v.source.file) return;
     const token = ++previewToken;
     const { start, end } = tl.sel;
+    const PREVIEW_N = previewN;
+    picked.clear();
     // (justo al final del video no hay imagen: el último, un instante antes)
     const times = Array.from({ length: PREVIEW_N }, (_, i) => Math.min(start + ((end - start) * i) / (PREVIEW_N - 1), tl.duration - 0.08));
     box.style.setProperty('--ar', `${video?.videoWidth || 9} / ${video?.videoHeight || 16}`); // la forma del video
-    $('#spInfo').textContent = `${fmtTime(start)} → ${fmtTime(end)} · ${(end - start).toFixed(1)} s. Son los fotogramas de los que se sacarán los dibujos; clic en uno para verlo en el video.`;
+    $('#spInfo').textContent = `${fmtTime(start)} → ${fmtTime(end)} · ${(end - start).toFixed(1)} s. ${mode === 'manual' ? 'Haz clic en los fotogramas que quieras convertir en viñetas.' : 'Clic en un fotograma para verlo en el video.'}`;
     box.innerHTML = times.map((t, i) => `<figure class="sp-f loading"><i></i><figcaption>${i === 0 ? 'Inicio' : i === PREVIEW_N - 1 ? 'Fin' : fmtTime(t)}</figcaption></figure>`).join('');
     try {
       const imgs = await captureFrames(`/media/${v.source.file}`, times, 220);
       if (token !== previewToken) return;
       box.innerHTML = imgs.map((src, i) => `
-        <figure class="sp-f" data-seek="${times[i]}" title="Ir a ${fmtTime(times[i])}">
-          <img src="${src}" alt=""><figcaption>${i === 0 ? `Inicio · ${fmtTime(times[i])}` : i === PREVIEW_N - 1 ? `Fin · ${fmtTime(times[i])}` : fmtTime(times[i])}</figcaption>
+        <figure class="sp-f" data-seek="${times[i]}" title="${mode === 'manual' ? 'Elegir' : 'Ir a'} ${fmtTime(times[i])}">
+          <b class="sp-n"></b><img src="${src}" alt=""><figcaption>${i === 0 ? `Inicio · ${fmtTime(times[i])}` : i === PREVIEW_N - 1 ? `Fin · ${fmtTime(times[i])}` : fmtTime(times[i])}</figcaption>
         </figure>`).join('');
+      drawPicks();
     } catch {
       /* sin vista previa: el resto funciona igual */
     }
@@ -390,12 +450,27 @@ export function renderVideo(root, id) {
       zoom(e.deltaY < 0 ? 0.8 : 1.25);
     }, { passive: false });
 
-    // Vista previa: clic en un fotograma = ir a él en el video.
+    $('#spCount').addEventListener('input', (e) => {
+      previewN = Number(e.target.value);
+      $('#spCountN').textContent = previewN;
+      try {
+        localStorage.setItem('jr-preview-frames', previewN);
+      } catch {
+        /* solo esta vez */
+      }
+      drawPreview();
+    });
+
+    // Vista previa: clic en un fotograma = ir a él en el video y, en el modo manual, elegirlo.
     $('#spFrames').addEventListener('click', (e) => {
       const f = e.target.closest('[data-seek]');
       if (!f) return;
       video.pause();
-      video.currentTime = Number(f.dataset.seek);
+      const t = Number(f.dataset.seek);
+      video.currentTime = t;
+      if (mode !== 'manual') return;
+      if (!picked.delete(t)) picked.add(t);
+      drawPicks();
     });
 
     // Tiempos exactos escritos a mano.
@@ -432,6 +507,7 @@ export function renderVideo(root, id) {
 
   // ---------- lista de ejercicios ----------
 
+  const aiPrompt = () => $('#spPrompt')?.value.trim() || '';
   const saveEx = {}; // guardados con retardo por ejercicio
   function saveExercise(id, patch) {
     Object.assign(exerciseById(id), patch);
@@ -447,7 +523,7 @@ export function renderVideo(root, id) {
   }
 
   function drawExercises() {
-    const list = exercisesOf(v.id);
+    const list = exercisesOf(v.id).filter((e) => !shownOnly || shownOnly.has(e.id));
     $('#exCount').textContent = `(${list.length})`;
     $('#exDelAll').hidden = list.length < 2;
     $('#exList').innerHTML = list.length
@@ -474,7 +550,7 @@ export function renderVideo(root, id) {
           <details class="ex-details">
             <summary>Técnica y categoría</summary>
             <label class="field">Categoría
-              <select data-f="category">${[...new Set([...CATEGORIES, e.category].filter(Boolean))].map((c) => `<option ${c === e.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+              <select data-f="category">${[...new Set([...CATEGORIES, e.category].filter(Boolean))].map((c) => `<option value="${esc(c)}" ${c === e.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
             <label class="field">Técnica<textarea data-f="summary" rows="3">${esc(e.technique?.summary)}</textarea></label>
             <label class="field">Claves técnicas <small>(una por línea)</small><textarea data-f="cues" rows="4">${esc((e.technique?.cues || []).join('\n'))}</textarea></label>
           </details>
@@ -506,13 +582,14 @@ export function renderVideo(root, id) {
     let text = '';
     if (jobs.analyzing?.id === v.id) ((p = jobs.analyzing.p), (text = `Sacando los dibujos… ${Math.round(p * 100)}%`));
     else if (isAnalyzing(v.id)) ((p = 0), (text = 'En cola para analizar…'));
-    else if (busyManual) ((p = busyManual.p), (text = `Extrayendo el tramo… ${Math.round(busyManual.p * 100)}%`));
+    else if (busyManual) ((p = busyManual.p), (text = isVideo ? `Extrayendo el tramo… ${Math.round(busyManual.p * 100)}%` : `Sacando los dibujos… ${Math.round(busyManual.p * 100)}%`));
     box.hidden = p == null;
     if (p != null) {
       $('#bar').style.width = Math.round(p * 100) + '%';
       $('#progText').textContent = p === 0 && jobs.analyzing?.id === v.id ? 'Cargando el detector de pose…' : text;
     }
-    root.querySelectorAll('[data-act="auto"],[data-act="ex-extract"],[data-act="ex-reextract"]').forEach((b) => (b.disabled = p != null));
+    root.querySelectorAll('[data-act="auto"],[data-act="process-seg"],[data-act="ex-extract"],[data-act="ex-reextract"]').forEach((b) => (b.disabled = p != null));
+    drawPicks();
   }
 
   // Marca el tramo del timeline sin sacar dibujos: se sacan al crear la rutina.
@@ -520,8 +597,9 @@ export function renderVideo(root, id) {
     if (!tl.sel) return toast('Marca primero el tramo en el timeline', 'error');
     const { start, end } = tl.sel;
     try {
-      const ex = upsert('exercises', await api.createExercise({ videoId: v.id, title: `Tramo ${exercisesOf(v.id).length + 1}`, start, end, mode: 'manual', keyframes: [] }));
+      const ex = upsert('exercises', await api.createExercise({ videoId: v.id, title: tr(`Tramo ${exercisesOf(v.id).length + 1}`), start, end, mode: 'manual', keyframes: [], aiPrompt: aiPrompt() }));
       activeId = ex.id;
+      $('#spPrompt').value = '';
       drawExercises();
       toast(`Tramo ${fmtTime(start)} → ${fmtTime(end)} marcado. Sus dibujos se sacan al crear la rutina.`);
     } catch (e) {
@@ -529,17 +607,35 @@ export function renderVideo(root, id) {
     }
   }
 
+  // El estilo elegido abajo: el gratuito ya es el que acaba de hacer la app.
+  async function applyStyle(id) {
+    const style = state.ai?.styles.find((s) => s.id === state.ai.style);
+    const ex = exerciseById(id);
+    if (style?.free && ex?.aiPrompt) return toast('Las instrucciones para la IA necesitan un estilo Premium: el dibujo se ha hecho con el estilo gratuito.', 'error');
+    if (!style || style.free || !ex?.keyframes.some((k) => k.img)) return;
+    if (!state.ai.premium) return toast('El estilo elegido es Premium: los dibujos se han hecho con el estilo gratuito.', 'error');
+    busyManual = { p: 0 };
+    drawProgress();
+    await improveWithAi(ex, (i, total) => ((busyManual = { p: (i - 1) / total }), drawProgress()));
+    busyManual = false;
+    drawProgress();
+    drawExercises();
+  }
+
   async function runManual(exerciseId = null, range = tl.sel) {
     if (!range) return toast('Marca primero el tramo en el timeline', 'error');
+    let made = null;
     busyManual = { p: 0 };
     drawProgress();
     try {
       const ex = await manualExtract(v.id, range.start, range.end, {
         count: +$('#kcount').value,
         exerciseId,
+        aiPrompt: aiPrompt(),
         onProgress: (p) => ((busyManual = { p }), drawProgress()),
       });
-      activeId = ex.id;
+      activeId = made = ex.id;
+      $('#spPrompt').value = '';
       toast(exerciseId ? 'Ejercicio actualizado con el nuevo tramo' : 'Ejercicio añadido');
     } catch (e) {
       toast('No se pudo extraer: ' + e.message, 'error');
@@ -548,11 +644,79 @@ export function renderVideo(root, id) {
       drawProgress();
       drawExercises();
     }
+    if (made) await applyStyle(made);
+  }
+
+  async function runImage() {
+    let made = null;
+    const style = state.ai?.styles.find((s) => s.id === state.ai.style);
+    const redrawn = Boolean(style && !style.free && state.ai.premium);
+    if (redrawn) shownOnly = new Set(exercisesOf(v.id).map((e) => e.id));
+    busyManual = { p: 0 };
+    drawProgress();
+    try {
+      const ex = await imageExtract(v.id, {
+        aiPrompt: aiPrompt(),
+        onProgress: (p) => ((busyManual = { p }), drawProgress()),
+      });
+      activeId = made = ex.id;
+      $('#spPrompt').value = '';
+      if (!redrawn) toast('Dibujo añadido');
+    } catch (e) {
+      toast('No se pudo extraer: ' + e.message, 'error');
+    } finally {
+      busyManual = false;
+      drawProgress();
+      drawExercises();
+    }
+    if (made) await applyStyle(made);
+    if (!redrawn) return;
+    // Si la IA no llegó a dibujar (cancelado o error), no queda un dibujo gratuito que no se pidió.
+    if (made && !exerciseById(made)?.keyframes.some((k) => k.origImg)) {
+      await api.deleteExercise(made).catch(() => {});
+      await refresh();
+      if (activeId === made) activeId = null;
+    }
+    shownOnly = null;
+    drawExercises();
+  }
+
+  async function runFrames() {
+    let made = null;
+    busyManual = { p: 0 };
+    drawProgress();
+    try {
+      const { ex, skipped } = await framesExtract(v.id, [...picked].sort((a, b) => a - b), {
+        aiPrompt: aiPrompt(),
+        onProgress: (p) => ((busyManual = { p }), drawProgress()),
+      });
+      activeId = made = ex.id;
+      picked.clear();
+      $('#spPrompt').value = '';
+      toast(skipped ? `Ejercicio añadido. ${skipped === 1 ? 'En 1 fotograma' : `En ${skipped} fotogramas`} no se detectó a la persona.` : 'Ejercicio añadido');
+    } catch (e) {
+      toast('No se pudo extraer: ' + e.message, 'error');
+    } finally {
+      busyManual = false;
+      drawProgress();
+      drawExercises();
+    }
+    if (made) await applyStyle(made);
   }
 
   // ---------- acciones ----------
 
   root.addEventListener('click', async (e) => {
+    const styleBtn = e.target.closest('.style-tile');
+    if (styleBtn) {
+      await chooseAi(styleBtn);
+      root.querySelectorAll('.style-tile').forEach((b) => {
+        const on = b.value === state.ai.style;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on);
+      });
+      return;
+    }
     const loadBtn = e.target.closest('[data-load]');
     if (loadBtn) return loadExercise(loadBtn.dataset.load);
     const nudge = e.target.closest('[data-nudge]');
@@ -581,6 +745,18 @@ export function renderVideo(root, id) {
     else if (act === 'mark-end' && tl.sel) setSel(tl.sel.start, Math.max(video.currentTime, tl.sel.start + 0.1));
     else if (act === 'play-sel') playSel();
     else if (act === 'mark-seg') markSegment();
+    else if (act === 'make-frames') runFrames();
+    else if (act === 'process-seg') runManual();
+    else if (act === 'mode') {
+      mode = el.dataset.mode;
+      try {
+        localStorage.setItem('jr-extract-mode', mode);
+      } catch {
+        /* solo esta vez */
+      }
+      applyMode();
+      drawPreview();
+    }
     else if (act === 'back-draw') {
       ui.returnToDraw = null;
       ui.openPanel = 'draw';
@@ -596,9 +772,17 @@ export function renderVideo(root, id) {
       }
     } else if (act === 'ex-extract') runManual(ex.id, { start: ex.start, end: ex.end });
     else if (act === 'auto') {
+      if (!isVideo) return runImage();
       const autos = exercisesOf(v.id).filter((x) => x.mode === 'auto').length;
       if (autos && !await ask(`Se sustituirán los ${autos} ejercicios que sacó la IA (los tramos que marcaste tú se quedan). ¿Continuar?`)) return;
-      queueAnalysis([v.id], { force: true }).then(() => toast('Dibujos sacados')).catch(() => {});
+      const prompt = aiPrompt();
+      $('#spPrompt').value = '';
+      queueAnalysis([v.id], { force: true })
+        .then(() => {
+          if (prompt) for (const x of exercisesOf(v.id)) if (x.mode === 'auto') saveExercise(x.id, { aiPrompt: prompt });
+          toast('Dibujos sacados');
+        })
+        .catch(() => {});
       drawProgress();
     } else if (act === 'seek-kf' && video && ex) {
       const k = ex.keyframes[+el.closest('[data-k]').dataset.k];
@@ -620,7 +804,7 @@ export function renderVideo(root, id) {
         toast(err.message, 'error');
       }
     } else if (act === 'ex-del' && ex) {
-      if (!await ask(`¿Eliminar el ejercicio «${ex.title}»? También se quitará de las rutinas.`)) return;
+      if (!await ask(`¿Eliminar el ejercicio «${ex.title}»? También se quitará de las rutinas. ${tr(usedInRoutines([ex.id]))}`)) return;
       await api.deleteExercise(ex.id);
       await refresh();
       drawExercises();
@@ -657,6 +841,7 @@ export function renderVideo(root, id) {
   }, 600);
 
   root.addEventListener('change', async (e) => {
+    if (e.target.matches('select[data-ai-choice]')) return chooseAi(e.target);
     if (e.target.id === 'vlib') {
       upsert('videos', await api.updateVideo(v.id, { libraryId: e.target.value }));
       const to = libraryById(e.target.value);

@@ -121,7 +121,7 @@ function withLocal(kind, local, rec, sp) {
 }
 
 /** Imágenes pequeñas de un elemento (van por Firestore; los videos y fotos, por Drive). */
-const smallFiles = (kind, r) => (kind === 'videos' ? [r?.poster] : kind === 'exercises' ? (r?.keyframes || []).map((k) => k.img) : []).filter(Boolean);
+const smallFiles = (kind, r) => (kind === 'videos' ? [r?.poster] : kind === 'exercises' ? (r?.keyframes || []).flatMap((k) => [k.img, k.origImg]) : []).filter(Boolean);
 
 function index(db) {
   const by = {};
@@ -169,7 +169,7 @@ const nameOf = (root) => String(root?.name || root?.title || '').slice(0, 80);
 /**
  * ctx: { localDir, uploadDir, getDb, saveDb, markSaved(r) (no cuenta como cambio de aquí), onData() }
  */
-export function createCollab({ localDir, uploadDir, getDb, saveDb, markSaved, onData }) {
+export function createCollab({ localDir, uploadDir, getDb, saveDb, markSaved, onData, onAutomaticChange = () => {} }) {
   const STATE_FILE = path.join(localDir, 'colabora.json');
   let st = (() => {
     try {
@@ -357,7 +357,12 @@ export function createCollab({ localDir, uploadDir, getDb, saveDb, markSaved, on
     let changed = false;
     for (const k of setOf(sp, ix)) {
       const r = recOf(ix, k);
-      if (r && !r.addedBy) ((r.addedBy = my), (changed = true));
+      if (r && !r.addedBy) {
+        const before = structuredClone(r);
+        r.addedBy = my;
+        onAutomaticChange(unkey(k)[0], before, r, ['addedBy']);
+        changed = true;
+      }
     }
     // Videos y fotos de una carpeta compartida: a tu Drive, con enlace para los demás.
     if (sp.type === 'folder') {
@@ -369,7 +374,9 @@ export function createCollab({ localDir, uploadDir, getDb, saveDb, markSaved, on
         const driveId = await google.uploadShared(v.source.file, await fsp.readFile(path.join(uploadDir, v.source.file)));
         const cur = getDb().videos.find((x) => x.id === v.id);
         if (cur && !cur.source.drive && cur.source.file === v.source.file) {
+          const before = structuredClone(cur);
           Object.assign(cur.source, { drive: driveId, driveBy: my });
+          onAutomaticChange('videos', before, cur, ['source']);
           changed = true;
         } else {
           google.deleteFile(driveId).catch(() => {}); // mientras tanto se borró o cambió

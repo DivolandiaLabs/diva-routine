@@ -8,6 +8,9 @@
 // que usan todas las instalaciones (Ajustes en la app, o config.json). Lo de cada ordenador
 // (la sesión de Instagram) se queda siempre en su carpeta data/ local.
 import http from 'node:http';
+import { LibraryHistory } from './library-history.js';
+const libraryHistory = new LibraryHistory();
+let libraryActionChain = Promise.resolve();
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -19,7 +22,10 @@ import * as ig from './instagram.js';
 import * as social from './social.js';
 import * as cloud from './cloud.js';
 import * as google from './google.js';
+import * as ai from './ai.js';
+import * as backup from './backup.js';
 import { createCollab, RULES } from './collab.js';
+import { normalizeTableStyle } from './public/js/routine-styles.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -81,6 +87,7 @@ try {
   console.error(dataError);
 }
 ig.initInstagram(LOCAL_DIR);
+ai.initAi(LOCAL_DIR);
 social.initSocial(LOCAL_DIR);
 // El identificador de Google y la configuración de Firebase van junto a la app (valen para todos
 // tus ordenadores y para quien se la pases); la sesión, en data/ local.
@@ -97,7 +104,7 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 
 // ---------- base de datos (JSON en disco) ----------
 
-let db = dataError ? { libraries: [], videos: [], exercises: [], routines: [], deleted: {} } : loadDb();
+let db = dataError ? { libraries: [], videos: [], exercises: [], routines: [], routineTabs: [], deleted: {} } : loadDb();
 
 // Lee un JSON reintentando unos segundos si está ocupado (al actualizar, la app anterior puede
 // tenerlo abierto todavía, o el antivirus estar escaneando el archivo recién instalado/escrito).
@@ -136,6 +143,7 @@ function loadDb() {
     videos: parsed.videos || [],
     exercises: [],
     routines: parsed.routines || [],
+    routineTabs: parsed.routineTabs || [], // pestañas de grupos en el Creador de rutinas
     deleted: parsed.deleted || {}, // id -> cuándo se borró (para sincronizar borrados)
   };
   if (!data.libraries.length) data.libraries.push({ id: newId(), name: 'General', createdAt: now() });
@@ -184,13 +192,14 @@ function loadDb() {
 // versión de cada elemento es la más nueva y qué se borró. Se calcula solo al guardar,
 // comparando con lo último guardado: así no hay que tocarlo en cada sitio que cambia datos.
 
-const COLLECTIONS = ['libraries', 'videos', 'exercises', 'routines'];
+const COLLECTIONS = ['libraries', 'videos', 'exercises', 'routines', 'routineTabs'];
 const recordKey = (r) => {
   const { updatedAt, ...rest } = r;
   return JSON.stringify(rest);
 };
 let savedSnap = new Map(); // id -> cómo estaba al guardarlo (sin updatedAt)
 function rememberSaved(data) {
+  libraryHistory.resetBaseline(data);
   savedSnap = new Map();
   for (const c of COLLECTIONS) for (const r of data[c]) savedSnap.set(r.id, recordKey(r));
 }
@@ -222,6 +231,7 @@ function stampChanges() {
 let saveChain = Promise.resolve();
 function saveDb() {
   if (dataError) return Promise.reject(Object.assign(new Error(dataError), { status: 503 }));
+  libraryHistory.capture(db);
   stampChanges();
   onLocalChange();
   // Escritura atómica y serializada para no corromper el archivo.
@@ -358,7 +368,7 @@ function referencedFiles(data) {
     if (v.source?.file) s.add(v.source.file);
     if (v.poster) s.add(v.poster);
   }
-  for (const e of data.exercises) for (const k of e.keyframes || []) if (k.img) s.add(k.img);
+  for (const e of data.exercises) for (const k of e.keyframes || []) for (const f of [k.img, k.origImg]) if (f) s.add(f);
   return s;
 }
 
@@ -465,6 +475,7 @@ const collab = createCollab({
   localDir: LOCAL_DIR,
   uploadDir: UPLOAD_DIR,
   getDb: () => db,
+  onAutomaticChange: (kind, before, after, fields) => libraryHistory.acceptAutomatic(kind, before, after, fields),
   saveDb,
   markSaved: (r) => savedSnap.set(r.id, recordKey(r)), // llegó de fuera: no es un cambio de aquí
   onData: () => (dataVersion = Date.now()),
@@ -482,7 +493,9 @@ async function fetchShared(v0) {
   } catch (e) {
     const v = db.videos.find((x) => x.id === v0.id);
     if (v) {
+      const before = structuredClone(v);
       v.source.fetchError = String(e.message || e).slice(0, 300);
+      libraryHistory.acceptAutomatic('videos', before, v, ['source', 'poster', 'title']);
       await saveDb();
     }
     throw e;
@@ -522,6 +535,7 @@ function detectPlatform(url) {
   if (u.includes('youtube.com') || u.includes('youtu.be')) return 'youtube';
   if (u.includes('tiktok.com')) return 'tiktok';
   if (u.includes('vimeo.com')) return 'vimeo';
+  if (social.netOf(u) === 'x') return 'x';
   return 'web';
 }
 
@@ -631,6 +645,53 @@ async function appVersion() {
   return String(Math.round(latest));
 }
 
+// Cambia lo que hay por un backup. No se toca nada hasta que el archivo llega entero y está bien;
+// lo de ahora queda en «antes-de-restaurar» (y sustituye al de la vez anterior).
+const moveDir = async (from, to) => {
+  for (let i = 1; ; i++) {
+    try {
+      return await fsp.rename(from, to);
+    } catch (e) {
+      if (e.code === 'ENOENT') return;
+      if (i >= 6) throw e;
+      await new Promise((r) => setTimeout(r, 300)); // el antivirus o un video abierto lo sueltan enseguida
+    }
+  }
+};
+let restoring = false;
+async function restoreBackup(req) {
+  if (dataError) throw fail(503, dataError);
+  if (restoring) throw fail(409, 'Ya se está restaurando un backup.');
+  restoring = true;
+  const stage = path.join(DATA_DIR, `.restaurando-${newId()}`);
+  const prev = path.join(DATA_DIR, 'antes-de-restaurar');
+  try {
+    await backup.readArchive(req, stage);
+    await saveChain.catch(() => {});
+    await fsp.rm(prev, { recursive: true, force: true });
+    await fsp.mkdir(prev);
+    await moveDir(DB_FILE, path.join(prev, 'db.json'));
+    await moveDir(UPLOAD_DIR, path.join(prev, 'uploads'));
+    try {
+      await moveDir(path.join(stage, 'uploads'), UPLOAD_DIR);
+      await moveDir(path.join(stage, 'db.json'), DB_FILE);
+    } catch (e) {
+      await fsp.rm(UPLOAD_DIR, { recursive: true, force: true });
+      await moveDir(path.join(prev, 'uploads'), UPLOAD_DIR);
+      await moveDir(path.join(prev, 'db.json'), DB_FILE);
+      throw fail(500, `No se pudo restaurar (${e.code || e.message}): tus datos siguen como estaban. Cierra los videos abiertos y prueba otra vez.`);
+    }
+    db = loadDb();
+    rememberSaved(db);
+    diskStamp = await stampOf();
+    dataVersion = Date.now();
+    return { kept: prev };
+  } finally {
+    restoring = false;
+    await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 // Guarda el cuerpo de la petición (archivo crudo) en data/uploads.
 async function receiveUpload(req) {
   const original = decodeURIComponent(req.headers['x-filename'] || 'archivo');
@@ -650,8 +711,36 @@ async function receiveUpload(req) {
 
 async function removeUpload(fileName) {
   if (!fileName) return;
+  if (libraryHistory.active()) return holdUpload(fileName);
   const p = safeJoin(UPLOAD_DIR, fileName);
   if (p) await fsp.unlink(p).catch(() => {});
+}
+
+// Viñetas de dibujos borrados: se guardan aquí para poder deshacer, y desaparecen al cerrar la app.
+const TEMP_DIR = path.join(LOCAL_DIR, 'temporal');
+const clearTemp = () => fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+clearTemp();
+process.on('exit', clearTemp);
+
+async function moveFile(from, to) {
+  await fsp.rename(from, to).catch(async () => {
+    await fsp.copyFile(from, to);
+    await fsp.unlink(from);
+  });
+}
+
+const heldUploads = new Set();
+function holdUpload(fileName) {
+  const task = retainUpload(fileName);
+  heldUploads.add(task);
+  task.then(() => heldUploads.delete(task), () => heldUploads.delete(task));
+  return task;
+}
+async function retainUpload(fileName) {
+  const from = fileName && safeJoin(UPLOAD_DIR, fileName);
+  if (!from) return;
+  await fsp.mkdir(TEMP_DIR, { recursive: true });
+  await moveFile(from, path.join(TEMP_DIR, path.basename(fileName))).catch(() => {});
 }
 
 // ---------- yt-dlp (descarga de YouTube, Instagram, TikTok…) ----------
@@ -748,7 +837,7 @@ async function downloadSource(source) {
       return { ...got, mediaType: 'video', title: null };
     }
   }
-  // YouTube, TikTok, Facebook: con tu sesión si la conectaste (videos privados o que piden cuenta).
+  // YouTube, TikTok, Facebook, X: con tu sesión si la conectaste (videos privados o que piden cuenta).
   const net = social.netOf(source.url);
   if (net) return { ...(await social.withCookies(net, (args) => downloadWithYtDlp(source.url, args))), mediaType: 'video' };
   return { ...(await downloadWithYtDlp(source.url)), mediaType: 'video' };
@@ -847,9 +936,9 @@ const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map(
 // poster: imagen de portada (un fotograma), para la Biblioteca.
 const VIDEO_EDITABLE = ['title', 'titleLocked', 'libraryId', 'notes', 'poster', 'pinnedTop'];
 // titleLocked/categoryLocked: editados a mano, el análisis ya no los sustituye.
-const EXERCISE_EDITABLE = ['title', 'titleLocked', 'start', 'end', 'mode', 'keyframes', 'technique', 'category', 'categoryLocked', 'notes'];
+const EXERCISE_EDITABLE = ['pinnedTop', 'srcLabel', 'title', 'titleLocked', 'start', 'end', 'mode', 'keyframes', 'technique', 'category', 'categoryLocked', 'notes', 'aiPrompt'];
 // pinned / pinnedIn: la rutina se ve arriba en esas bibliotecas (pinned, de antes: en la principal).
-const ROUTINE_EDITABLE = ['name', 'items', 'notes', 'pinned', 'pinnedIn'];
+const ROUTINE_EDITABLE = ['name', 'subtitle', 'items', 'notes', 'pinned', 'pinnedIn', 'tabs', 'pinnedTop', 'tableStyle'];
 
 const rootLibrary = () => db.libraries.find((l) => l.root) || db.libraries[0];
 
@@ -907,14 +996,14 @@ function newExercise(videoId, fields) {
 }
 
 // Viñetas (dibujos de cada fase) guardadas en uploads.
-const framesOf = (ex) => (ex.keyframes || []).map((k) => k.img).filter(Boolean);
+const framesOf = (ex) => (ex.keyframes || []).flatMap((k) => [k.img, k.origImg]).filter(Boolean);
 
 function dropExercises(pred) {
   const dropped = db.exercises.filter(pred);
   const gone = new Set(dropped.map((e) => e.id));
   db.exercises = db.exercises.filter((e) => !gone.has(e.id));
   for (const r of db.routines) r.items = r.items.filter((it) => !gone.has(it.exerciseId));
-  for (const f of dropped.flatMap(framesOf)) removeUpload(f);
+  for (const f of dropped.flatMap(framesOf)) holdUpload(f);
 }
 
 // ---------- ajustes: carpeta de datos ----------
@@ -1028,22 +1117,26 @@ async function fetchVideo(v0) {
   const v = current();
   if (!v) return removeUpload(got.file);
   if (v.source.file) return removeUpload(got.file); // ya lo bajó otro ordenador
-  delete v.source.fetchError;
   await removeUpload(v.source.file);
   await removeUpload(v.poster); // la portada era del archivo anterior
+  const before = structuredClone(v);
+  delete v.source.fetchError;
   delete v.poster;
   Object.assign(v.source, { file: got.file, mediaType: got.mediaType });
   if (got.title && !v.titleLocked) v.title = got.title.slice(0, 120);
+  libraryHistory.acceptAutomatic('videos', before, v, ['source', 'poster', 'title']);
   await saveDb();
 }
 
 async function deleteVideo(v) {
   db.videos = db.videos.filter((x) => x !== v);
   dropExercises((e) => e.videoId === v.id);
+  libraryHistory.capture(db); // Record the deletion before waiting on file operations.
   await removeUpload(v.source.file);
   await removeUpload(v.poster);
+  await Promise.all([...heldUploads]);
   // La copia compartida en tu Drive, si la subiste tú.
-  if (v.source.drive && v.source.driveBy && v.source.driveBy === google.email()?.toLowerCase()) google.deleteFile(v.source.drive).catch(() => {});
+  if (!libraryHistory.active() && v.source.drive && v.source.driveBy && v.source.driveBy === google.email()?.toLowerCase()) google.deleteFile(v.source.drive).catch(() => {});
 }
 
 async function handleApi(req, res, parts) {
@@ -1051,6 +1144,26 @@ async function handleApi(req, res, parts) {
   const method = req.method;
 
   // --- ajustes: carpeta de datos (compartida entre ordenadores o la de este) ---
+  if (resource === 'backup') {
+    if (id === 'info' && method === 'GET') {
+      const files = await backup.listUploads(UPLOAD_DIR);
+      return send(res, 200, { files: files.length, bytes: files.reduce((a, f) => a + f.size, 0), videos: db.videos.length, routines: db.routines.length });
+    }
+    if (!id && method === 'GET') {
+      await saveChain.catch(() => {});
+      res.writeHead(200, {
+        'Content-Type': 'application/x-tar',
+        'Content-Disposition': `attachment; filename="diva-routine-backup-${now().slice(0, 10)}.tar"`,
+      });
+      await backup.writeArchive(res, { dbJson: JSON.stringify(db), uploadDir: UPLOAD_DIR, version: DESKTOP?.version || '' }).catch((e) => {
+        console.error('[backup]', e.message);
+        res.destroy();
+      });
+      return;
+    }
+    if (!id && method === 'POST') return send(res, 200, await restoreBackup(req));
+  }
+
   if (resource === 'settings') {
     if (!id && method === 'GET') return send(res, 200, await settingsInfo());
     if (id === 'data-dir' && method === 'POST') {
@@ -1074,6 +1187,7 @@ async function handleApi(req, res, parts) {
       res.writeHead(302, { Location: google.loginUrl(`http://127.0.0.1:${PORT}/`, { drive: wantDrive }) });
       return res.end();
     }
+    if (id === 'storage' && method === 'GET') return send(res, 200, await google.storage());
     if (id === 'logout' && method === 'POST') {
       await google.logout();
       Object.assign(gsync, { state: 'off', error: null, progress: null });
@@ -1119,6 +1233,33 @@ async function handleApi(req, res, parts) {
   if (dataError) throw fail(503, dataError);
   await syncFromDisk();
 
+  if (resource === 'library-undo') {
+    const owner = String(req.headers['x-library-undo'] || '');
+    if (!/^[a-zA-Z0-9-]{1,80}$/.test(owner)) throw fail(400, 'Historial no válido.');
+    if (method === 'GET') return send(res, 200, libraryHistory.status(owner));
+    if (method === 'POST') {
+      const { next, entry } = libraryHistory.prepare(owner, db);
+      collab.guard(d => { d.libraries = next.libraries; d.videos = next.videos; });
+      // Files are copied synchronously so synchronization cannot change the checked records
+      // between conflict validation and applying their inverse.
+      const files = new Set();
+      for (const change of entry.changes.values()) {
+        const r = change.before;
+        if (!r) continue;
+        if (change.kind === 'videos') { files.add(r.source?.file); files.add(r.poster); }
+        if (change.kind === 'exercises') framesOf(r).forEach(f => files.add(f));
+      }
+      for (const file of files) {
+        const from = file && safeJoin(TEMP_DIR, file), to = file && safeJoin(UPLOAD_DIR, file);
+        if (from && to && !fs.existsSync(to) && fs.existsSync(from)) fs.copyFileSync(from, to);
+      }
+      for (const kind of COLLECTIONS) db[kind] = next[kind];
+      await saveDb();
+      libraryHistory.commit(owner, entry);
+      return send(res, 200, libraryHistory.status(owner));
+    }
+  }
+
   if (resource === 'state' && method === 'GET') {
     return send(res, 200, {
       ...db,
@@ -1128,6 +1269,7 @@ async function handleApi(req, res, parts) {
       ytdlp: Boolean(await findYtDlp()),
       instagram: ig.status(),
       social: social.status(),
+      ai: ai.status(),
       version: await appVersion(),
       data: dataVersion,
       sync: { shared: SHARED, dataDir: DATA_DIR, host: HOST, others: await othersOpen() },
@@ -1587,12 +1729,15 @@ async function handleApi(req, res, parts) {
     }
     if (!action && method === 'PUT') {
       const body = pick(await readJson(req), VIDEO_EDITABLE);
+      const automaticPoster = req.headers['x-automatic-poster'] === '1' && Object.keys(body).length === 1 && 'poster' in body;
       if ('libraryId' in body) {
         find('libraries', body.libraryId, 'Carpeta');
         collab.guard((d) => (d.videos.find((x) => x.id === v.id).libraryId = body.libraryId));
       }
       if ('poster' in body && v.poster && v.poster !== body.poster) await removeUpload(v.poster);
+      const before = automaticPoster ? structuredClone(v) : null;
       Object.assign(v, body);
+      if (automaticPoster) libraryHistory.acceptAutomatic('videos', before, v, ['poster']);
       await saveDb();
       return send(res, 200, forClient(v));
     }
@@ -1642,7 +1787,40 @@ async function handleApi(req, res, parts) {
     }
   }
 
+  // --- IA en la nube: si hay Premium y qué motor y estilo se han elegido ---
+  if (resource === 'ai') {
+    if (!id && method === 'GET') {
+      await ai.refresh();
+      return send(res, 200, ai.status());
+    }
+    if (id === 'license' && method === 'POST') {
+      await ai.activate((await readJson(req)).key);
+      return send(res, 200, ai.status());
+    }
+    if (id === 'credits' && method === 'POST') {
+      await ai.redeemPack((await readJson(req)).key);
+      return send(res, 200, ai.status());
+    }
+    if (id === 'license' && method === 'DELETE') {
+      await ai.deactivate();
+      return send(res, 200, ai.status());
+    }
+    if (id === 'choice' && method === 'POST') {
+      await ai.setChoice(await readJson(req));
+      return send(res, 200, ai.status());
+    }
+  }
+
   // --- viñetas: imagen de una fase (webp/png), se guarda y se devuelve su nombre ---
+  if (resource === 'restore-frames' && !id && method === 'POST') {
+    const { files } = await readJson(req);
+    for (const f of Array.isArray(files) ? files : []) {
+      const from = safeJoin(TEMP_DIR, String(f));
+      const to = safeJoin(UPLOAD_DIR, String(f));
+      if (from && to) await moveFile(from, to).catch(() => {});
+    }
+    return send(res, 200, { ok: true });
+  }
   if (resource === 'frames' && !id && method === 'POST') {
     const up = await receiveUpload(req);
     if (up.mediaType !== 'image') {
@@ -1654,6 +1832,13 @@ async function handleApi(req, res, parts) {
 
   // --- ejercicios (tramos de un video) ---
   if (resource === 'exercises') {
+    if (id === 'order' && method === 'POST') {
+      // { ids }: el orden de los dibujos en el Creador de rutinas, del primero al último.
+      const { ids } = await readJson(req);
+      (Array.isArray(ids) ? ids : []).forEach((x, i) => (find('exercises', x, 'Ejercicio').drawOrder = i));
+      await saveDb();
+      return send(res, 200, { ok: true });
+    }
     if (!id && method === 'POST') {
       const body = await readJson(req);
       find('videos', body.videoId, 'Video');
@@ -1663,6 +1848,45 @@ async function handleApi(req, res, parts) {
       return send(res, 201, ex);
     }
     const ex = find('exercises', id, 'Ejercicio');
+    // Redibujar una fase con IA. La viñeta de antes queda en origImg para poder volver a ella;
+    // las fases ya redibujadas van de referencia para que salga la misma persona.
+    if (action === 'redraw' && method === 'POST') {
+      const n = Number(sub);
+      const { image } = await readJson(req);
+      if (!ex.keyframes?.[n]?.img || typeof image !== 'string') throw fail(400, 'Esa fase no tiene dibujo.');
+      const done = ex.keyframes.slice(0, n).filter((k) => k.origImg).slice(-4).map((k) => k.img);
+      const references = (await Promise.all(done.map(async (f) => {
+        const data = await fsp.readFile(path.join(UPLOAD_DIR, f)).catch(() => null);
+        return data && { data, mime: f.endsWith('.png') ? 'image/png' : 'image/jpeg' };
+      }))).filter(Boolean);
+      const out = await ai.redraw(image, references, ex.aiPrompt);
+      const file = `${newId()}.${out.ext}`;
+      await fsp.writeFile(path.join(UPLOAD_DIR, file), out.data);
+      // Mientras respondía Google pueden haber llegado cambios de otro ordenador.
+      const cur = find('exercises', id, 'Ejercicio');
+      const k = cur.keyframes?.[n];
+      if (!k?.img) {
+        await removeUpload(file);
+        throw fail(409, 'El ejercicio cambió mientras se redibujaba. Prueba otra vez.');
+      }
+      const replaced = k.origImg ? k.img : null;
+      k.origImg ||= k.img;
+      k.img = file;
+      await saveDb();
+      if (replaced) await removeUpload(replaced);
+      return send(res, 200, cur);
+    }
+    if (action === 'restore' && method === 'POST') {
+      const made = (ex.keyframes || []).filter((k) => k.origImg);
+      const gone = made.map((k) => k.img);
+      for (const k of made) {
+        k.img = k.origImg;
+        delete k.origImg;
+      }
+      await saveDb();
+      for (const f of gone) await removeUpload(f);
+      return send(res, 200, ex);
+    }
     if (method === 'PUT') {
       const before = framesOf(ex);
       Object.assign(ex, pick(await readJson(req), EXERCISE_EDITABLE));
@@ -1679,17 +1903,56 @@ async function handleApi(req, res, parts) {
   }
 
   // --- rutinas ---
+  // Pestañas de rutinas: con libraryId muestran lo anclado a esa biblioteca; sin él, su propio grupo.
+  if (resource === 'routine-tabs') {
+    if (!id && method === 'POST') {
+      const body = await readJson(req);
+      const library = body.libraryId ? find('libraries', body.libraryId, 'Biblioteca') : null;
+      const name = String(body.name || '').trim().slice(0, 40);
+      if (!library && !name) throw fail(400, 'Ponle un nombre a la pestaña.');
+      const tab = { id: newId(), ...(library ? { libraryId: library.id } : { name }), createdAt: now() };
+      db.routineTabs.push(tab);
+      await saveDb();
+      return send(res, 201, tab);
+    }
+    if (id === 'order' && method === 'POST') {
+      const { ids = [] } = await readJson(req);
+      ids.forEach((tabId, i) => {
+        const t = db.routineTabs.find((x) => x.id === tabId);
+        if (t) t.order = i;
+      });
+      await saveDb();
+      return send(res, 200, { ok: true });
+    }
+    const tab = find('routineTabs', id, 'Pestaña');
+    if (method === 'PUT') {
+      const name = String((await readJson(req)).name || '').trim().slice(0, 40);
+      if (!name) throw fail(400, 'Ponle un nombre a la pestaña.');
+      if (!tab.libraryId) tab.name = name;
+      await saveDb();
+      return send(res, 200, tab);
+    }
+    if (method === 'DELETE') {
+      db.routineTabs = db.routineTabs.filter((x) => x !== tab);
+      for (const r of db.routines) if (r.tabs?.includes(id)) r.tabs = r.tabs.filter((x) => x !== id);
+      await saveDb();
+      return send(res, 200, { ok: true });
+    }
+  }
+
   if (resource === 'routines') {
     if (!id && method === 'POST') {
       const body = await readJson(req);
-      const r = { id: newId(), name: String(body.name || 'Nueva rutina').slice(0, 80), notes: '', items: body.items || [], createdAt: now(), updatedAt: now() };
+      const r = { id: newId(), name: String(body.name || 'Nueva rutina').slice(0, 80), notes: '', items: body.items || [], tableStyle: normalizeTableStyle(body.tableStyle), createdAt: now(), updatedAt: now() };
       db.routines.unshift(r);
       await saveDb();
       return send(res, 201, r);
     }
     const r = find('routines', id, 'Rutina');
     if (method === 'PUT') {
-      Object.assign(r, pick(await readJson(req), ROUTINE_EDITABLE), { updatedAt: now() });
+      const changes = pick(await readJson(req), ROUTINE_EDITABLE);
+      if ('tableStyle' in changes) changes.tableStyle = normalizeTableStyle(changes.tableStyle);
+      Object.assign(r, changes, { updatedAt: now() });
       await saveDb();
       return send(res, 200, r);
     }
@@ -1742,7 +2005,24 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname.startsWith('/api/')) {
-      return await handleApi(req, res, pathname.slice(5).split('/').filter(Boolean));
+      const parts = pathname.slice(5).split('/').filter(Boolean);
+      const owner = String(req.headers['x-library-undo'] || '');
+      const tracked = req.method !== 'GET' && /^(libraries|videos|copy|order|routines|cloud)$/.test(parts[0])
+        && !['fetch', 'sync', 'auto', 'file', 'exercises', 'promote'].includes(parts[2] || parts[1]);
+      if (/^[a-zA-Z0-9-]{1,80}$/.test(owner) && (tracked || parts[0] === 'library-undo')) {
+        const execute = async () => {
+          // Removing a shared root also changes membership; that cannot be restored here.
+          const sharedDelete = req.method === 'DELETE' && parts[0] === 'libraries'
+            && collab.info().spaces.some(sp => sp.type === 'folder' && [parts[1], ...descendantsOf(parts[1])].includes(sp.rootId));
+          if (!tracked || sharedDelete) return handleApi(req, res, parts);
+          const group = String(req.headers['x-library-undo-group'] || crypto.randomUUID()).slice(0, 80);
+          return libraryHistory.run(owner, group, () => handleApi(req, res, parts));
+        };
+        const result = libraryActionChain.then(execute);
+        libraryActionChain = result.catch(() => {});
+        return await result;
+      }
+      return await handleApi(req, res, parts);
     }
     if (pathname.startsWith('/media/')) {
       const p = safeJoin(UPLOAD_DIR, pathname.slice(7));

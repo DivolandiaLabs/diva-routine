@@ -1,8 +1,9 @@
 // Ventana de Instagram: conectar tu cuenta (con tu cookie de sesión) e importar tus colecciones de Guardados.
 import { api } from './api.js';
+import { lang, tr } from './i18n.js';
 
 const ALL_SAVED = 'ALL_MEDIA_AUTO_COLLECTION'; // «Todas las publicaciones guardadas»
-import { state, emit, esc, toast, upsert, canDownload, queueDownload, libraryLabel, ask } from './store.js';
+import { state, emit, esc, toast, upsert, canDownload, queueDownload, libraryLabel, libraryChoices, ask } from './store.js';
 
 // ---------- tutorial para conectar la cuenta (dibujos de lo que se ve en cada paso) ----------
 
@@ -27,9 +28,10 @@ const devtools = (body) => `
   <rect x="150" y="32" width="168" height="18" fill="#eceef1"/>${body}`;
 const tabs = (hl) => {
   let x = 155;
+  const cjk = /^(ja|ko)$/.test(lang);
   return ['Elementos', 'Consola', 'Red', 'Aplicación'].map((t) => {
-    const w = t.length * 4.3; // ancho aproximado del texto (7,5 px)
-    const out = `${t === hl ? `<rect x="${x - 3}" y="34" width="${w + 6}" height="15" rx="3" fill="#c4553a"/>` : ''}<text x="${x}" y="45" font-size="7.5" fill="${t === hl ? '#fff' : '#444'}" font-weight="${t === hl ? 700 : 400}">${t}</text>`;
+    const w = tr(t).length * (cjk ? 6 : 4.3); // ancho aproximado del texto (7,5 px; 6 px en japonés y coreano)
+    const out = `${t === hl ? `<rect x="${x - 3}" y="34" width="${w + 6}" height="15" rx="3" fill="#c4553a"/>` : ''}<text x="${x}" y="45" font-size="${cjk ? 6 : 7.5}" fill="${t === hl ? '#fff' : '#444'}" font-weight="${t === hl ? 700 : 400}">${t}</text>`;
     x += w + 9;
     return out;
   }).join('') + '<text x="306" y="45" font-size="9" fill="#444">»</text>';
@@ -190,7 +192,7 @@ export function openInstagram({ view = state.instagram.connected ? 'collections'
       <div class="ig-dest">
         <label><input type="radio" name="igDest" value="own" checked> Cada colección en su propia carpeta</label>
         <label><input type="radio" name="igDest" value="one"> Todas en
-          <select id="igLib">${state.libraries.map((l) => `<option value="${l.id}">${esc(libraryLabel(l))}</option>`).join('')}</select></label>
+          <select id="igLib">${libraryChoices().map((l) => `<option value="${l.id}">${esc(libraryLabel(l))}</option>`).join('')}</select></label>
       </div>
       <footer>
         <button class="btn small ghost danger" data-ig="disconnect">Desconectar Instagram</button>
@@ -210,7 +212,7 @@ export function openInstagram({ view = state.instagram.connected ? 'collections'
         <label class="ig-col">
           <input type="checkbox" value="${esc(c.id)}" ${checked.has(c.id) ? 'checked' : ''}>
           ${c.cover ? `<img src="${esc(c.cover)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.visibility='hidden'">` : '<span class="ig-cover"></span>'}
-          <span><b>${esc(c.name)}</b>
+          <span><b>${esc(c.id === ALL_SAVED ? tr(c.name) : c.name)}</b>
             <small>${c.count != null ? `${c.count} publicaciones` : ''}${c.libraries.length ? `${c.count != null ? ' · ' : ''}ya en «${esc(libName(c.libraries[0]) || '')}», se sincroniza` : ''}</small></span>
         </label>`).join('')
       : '<p class="hint">No tienes colecciones guardadas.</p>';

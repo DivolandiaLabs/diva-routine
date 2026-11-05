@@ -155,7 +155,7 @@ function start() {
 
     // Lo de fuera (enlaces, y el inicio de sesión con Google, que Google no deja hacer dentro
     // de una app) se abre en el navegador; al terminar, el servidor trae de vuelta esta ventana.
-    const openOutside = (url) => /^https?:\/\//i.test(url) && shell.openExternal(url);
+    const openOutside = (url) => /^(https?:\/\/|mailto:)/i.test(url) && shell.openExternal(url);
     const outside = (url) => !url.startsWith(origin + '/') || url.startsWith(origin + '/api/google/login');
     win.webContents.on('will-navigate', (e, url) => {
       if (!outside(url)) return;

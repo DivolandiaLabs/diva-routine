@@ -1,10 +1,13 @@
+import './i18n.js'; // el primero: así la app ya se pinta traducida
 import { api } from './api.js';
 import { state, refresh, emit, esc, toast, jobsText, syncInstagram, linkedLibraries, resumeDownloads, requestPoster } from './store.js';
 import { renderLibrary } from './library.js';
 import { renderVideo } from './video.js';
 import { renderRoutine } from './routine.js';
 import { renderRoutines } from './routines.js';
+import { renderAllRoutines } from './allroutines.js';
 import { openSettings } from './settings.js';
+import { maybeWelcome } from './welcome.js';
 
 const host = document.getElementById('app');
 let teardown = null;
@@ -13,6 +16,7 @@ let teardown = null;
 // es una ventana emergente, así que no cuenta aquí).
 function navSection() {
   const [, view] = location.hash.split('/');
+  if (view === 'todas') return 'todas';
   return ['rutinas', 'rutina'].includes(view) ? 'rutinas' : 'biblioteca';
 }
 
@@ -42,12 +46,19 @@ function route() {
   const views = {
     video: () => renderVideo(root, id),
     rutinas: () => renderRoutines(root),
+    todas: () => renderAllRoutines(root),
     rutina: () => renderRoutine(root, id),
   };
   teardown = (views[view] || (() => renderLibrary(root, id)))() || null;
 }
 
 window.addEventListener('hashchange', route);
+
+// Un clic en las letras de arriba cambia de logotipo; el icono sigue llevando a la biblioteca.
+document.querySelector('.topbar .brand-text').addEventListener('click', (e) => {
+  e.preventDefault();
+  window.appTheme.toggleLogo();
+});
 
 // Cualquier enlace a Ajustes (la cuenta arriba a la derecha, el aviso de sincronización, «Ir a
 // Ajustes»…) abre el popup en vez de navegar: así no se pierde lo que había detrás.
@@ -56,13 +67,14 @@ document.addEventListener('click', (e) => {
   if (!a) return;
   e.preventDefault();
   document.querySelectorAll('[data-nav]').forEach((x) => x.classList.toggle('active', x.dataset.nav === 'ajustes'));
-  openSettings().addEventListener('close', () => {
+  openSettings(a.dataset.settings).addEventListener('close', () => {
     document.querySelectorAll('[data-nav]').forEach((x) => x.classList.toggle('active', x.dataset.nav === navSection()));
   }, { once: true });
 });
 
 // Indicador de trabajos en segundo plano (descargas y análisis).
 window.addEventListener('store', (e) => {
+  if (e.detail.kind === 'ai' || e.detail.kind === 'data') drawCrown();
   if (e.detail.kind !== 'job') return;
   const el = document.getElementById('jobs');
   const text = jobsText();
@@ -82,6 +94,13 @@ window.addEventListener('store', (e) => {
   }
   if (state.google?.configured && !state.google.connected && !skippedLogin()) return showLogin();
   drawAccount(state.google);
+  drawCrown();
+  maybeWelcome();
+  // Sin esperarlo: comprueba con el servidor si la cuenta tiene Premium.
+  api.ai().then((a) => {
+    state.ai = a;
+    drawCrown();
+  }).catch(() => {});
   route();
   watchForUpdates(state.version);
   resumeDownloads();
@@ -105,7 +124,7 @@ function showLogin() {
   host.innerHTML = `
     <div class="login">
       <img class="login-logo" src="/logo.png" alt="">
-      <h1>Diva Routine</h1>
+      <h1><img class="brand-text" src="/logo-texto.png" alt="Diva Routine"></h1>
       <p>Entra con tu cuenta de Google para tener tus carpetas, vídeos, dibujos y rutinas en todos tus ordenadores y compartirlos con otras personas.</p>
       <a class="btn primary login-btn" href="/api/google/login">
         <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.8 6C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.3.8-4.7l-7.8-6C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.8-6z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.8 6C6.6 42.6 14.6 48 24 48z"/></svg>
@@ -130,6 +149,15 @@ function showLogin() {
 }
 
 // Cuenta con la que se ha entrado, arriba a la derecha (lleva a Ajustes).
+// La corona de arriba: se resalta con Premium activo.
+function drawCrown() {
+  const crown = document.querySelector('.premium-link');
+  const on = Boolean(state.ai?.premium);
+  crown.classList.toggle('on', on);
+  crown.title = on ? 'Premium activo' : 'Premium';
+  crown.setAttribute('aria-label', crown.title);
+}
+
 function drawAccount(g) {
   const el = document.getElementById('account');
   if (!el) return;
@@ -219,7 +247,7 @@ function drawUpdate(u) {
   bar = document.createElement('div');
   bar.id = 'appUpdateBar';
   bar.className = 'update-bar';
-  bar.innerHTML = `Hay una versión nueva de Diva Routine (<b>${esc(u.version)}</b>; tienes la ${esc(u.current)}).
+  bar.innerHTML = `<span>Hay una versión nueva de Diva Routine (<b>${esc(u.version)}</b>; tienes la ${esc(u.current)}).</span>
     <button class="btn small primary" data-up="install">Actualizar ahora</button>
     <button class="btn small ghost" data-up="later">Más tarde</button>`;
   bar.addEventListener('click', async (e) => {
@@ -289,3 +317,9 @@ function drawOthers(others) {
   }
   bar.textContent = `También está abierta en ${others.join(', ')}. Los cambios se ven en los dos en unos segundos; si cambiáis lo mismo a la vez, se queda el último.`;
 }
+
+// Las barras fijas se colocan justo debajo del menú, mida lo que mida.
+const topbar = document.querySelector('.topbar');
+new ResizeObserver(() => document.documentElement.style.setProperty('--top-h', `${topbar.offsetHeight}px`)).observe(topbar);
+
+document.getElementById('navBack').addEventListener('click', () => history.back());

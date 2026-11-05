@@ -2,14 +2,177 @@
 // (descargas, extracción automática y manual de ejercicios, creación de rutinas).
 import { api } from './api.js';
 import { figureSVG } from './figure.js';
-import { samplePoses, detectPose, loadImage, videoDuration, capturePoster } from './pose.js';
-import { analyze, segmentExercises } from './analysis.js';
+import { samplePoses, posesAt, detectPose, loadImage, videoDuration, capturePoster, frameBlob } from './pose.js';
+import { analyze, segmentExercises, labelPose } from './analysis.js';
 import { illustratePhases } from './illustrate.js';
+import { tr } from './i18n.js';
 
 export const state = { libraries: [], videos: [], exercises: [], routines: [], ytdlp: false, instagram: { connected: false }, collab: { ready: false, spaces: [] }, version: '' };
 
 export async function refresh() {
   Object.assign(state, await api.state());
+}
+
+// Miniaturas orientativas de cada estilo.
+const STYLE_IMG = { app: '/estilo-free.png', ink: '/estilo-ink.png', color: '/estilo-color.png', muscle: '/estilo-muscle.png', comic: '/estilo-comic.png', botanic: '/estilo-botanic.png', watercolor: '/estilo-watercolor.png', '3d': '/estilo-3d.png', neon: '/estilo-neon.png', atlas: '/estilo-atlas.png', cartoon: '/estilo-cartoon.png' };
+export const CROWN = '<svg class="crown" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg>';
+
+/** Recuadros para elegir el estilo de viñeta. */
+export function styleTiles() {
+  const a = state.ai;
+  if (!a) return '';
+  let folded = false;
+  try {
+    folded = localStorage.getItem('jr-styles-folded') === '1';
+  } catch {
+    /* sin almacenamiento */
+  }
+  return `<details class="style-pick" ${folded ? '' : 'open'}>
+    <summary><h4>Selecciona el estilo de viñeta</h4></summary>
+    <div class="style-grid">${a.styles.map((s) => `
+      <button class="style-tile${s.id === a.style ? ' on' : ''}" data-ai-choice="style" value="${esc(s.id)}" aria-pressed="${s.id === a.style}">
+        <span class="style-art"><img src="${esc(s.img || STYLE_IMG[s.id] || '')}" alt="">
+          ${s.free ? '<i class="style-tag free">Free</i>' : `<i class="style-tag premium" title="Premium" aria-label="Premium">${CROWN}</i>`}</span>
+        <span>${esc(s.label)}</span>
+      </button>`).join('')}</div>
+  </details>`;
+}
+
+// «toggle» no sube por el documento: se escucha en la captura.
+document.addEventListener('toggle', (e) => {
+  const key = e.target.matches?.('.style-pick') ? 'jr-styles-folded' : e.target.matches?.('.ai-box') ? 'jr-ai-folded' : null;
+  if (!key) return;
+  try {
+    localStorage.setItem(key, e.target.open ? '0' : '1');
+  } catch {
+    /* solo esta vez */
+  }
+}, true);
+
+export const foldedAi = () => {
+  try {
+    return localStorage.getItem('jr-ai-folded') === '1';
+  } catch {
+    return false;
+  }
+};
+
+/** Selector del motor de IA: el de los dibujos (model) o el del cuadro de prompt (promptModel). */
+export function modelPicker(field = 'model') {
+  const a = state.ai;
+  const list = field === 'promptModel' ? a?.models?.filter((m) => m.prompt !== false) : a?.models;
+  if (!list?.length) return '';
+  return `<label class="inline model-pick">Motor <select data-ai-choice="${field}">${list.map((m) => `<option value="${esc(m.id)}" ${m.id === a[field] ? 'selected' : ''}>${esc(tr(m.label))} · ${esc(tr(`${m.cost} crédito${m.cost === 1 ? '' : 's'}`))}</option>`).join('')}</select></label>`;
+}
+
+export async function chooseAi(select) {
+  try {
+    state.ai = await api.aiChoice({ [select.dataset.aiChoice]: select.value });
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+/** La viñeta en JPEG sobre blanco: su fondo es transparente y la IA lo vería negro. */
+async function flattened(file) {
+  const img = await loadImage(`/media/${encodeURI(file)}`);
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(img, 0, 0);
+  return c.toDataURL('image/jpeg', 0.92).split(',')[1];
+}
+
+/** Redibuja con IA las viñetas de un ejercicio, una a una. Siempre parte de la viñeta original. */
+export async function improveDrawings(ex, onProgress = () => {}, targets = null) {
+  const phases = (targets || ex.keyframes.map((_, i) => ({ ex, i }))).filter((p) => p.ex.keyframes[p.i]?.img);
+  try {
+    for (const [done, p] of phases.entries()) {
+      const k = exerciseById(p.ex.id).keyframes[p.i];
+      onProgress(done + 1, phases.length);
+      upsert('exercises', await api.redrawPhase(p.ex.id, p.i, await flattened(k.origImg || k.img)));
+    }
+  } finally {
+    emit('data');
+  }
+}
+
+/** Con el estilo Free elegido: ventana para escoger estilo Premium y motor, con los créditos. */
+function askModel(ex, n) {
+  const field = ex.aiPrompt?.trim() ? 'promptModel' : 'model';
+  const premium = state.ai.styles.filter((s) => !s.free);
+  return new Promise((resolve) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'ask';
+    dlg.innerHTML = `<label class="inline model-pick">Estilo <select id="askStyle">${premium.map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join('')}</select></label>${modelPicker(field)}<p id="askAi"></p>
+      <footer><button class="btn ghost" value="no">Cancelar</button><button class="btn primary" value="yes">Aceptar</button></footer>`;
+    document.body.append(dlg);
+    const draw = () => {
+      const model = state.ai.models.find((m) => m.id === state.ai[field]);
+      const spend = n * model.cost;
+      const left = Math.max(0, state.ai.limit - state.ai.used) + (state.ai.extra || 0);
+      const style = premium.find((s) => s.id === dlg.querySelector('#askStyle').value);
+      dlg.querySelector('#askAi').textContent = tr(spend > left
+        ? `Necesitas ${spend} créditos y te quedan ${left} en este periodo`
+        : `¿Mejorar con IA ${n === 1 ? 'el dibujo' : `los ${n} dibujos`} de «${ex.title}» con el estilo «${style.label}» y el motor ${model.label}? Gastarás ${spend} de tus ${left} créditos. Las imágenes se envían al servicio de IA en la nube (el video no). Podrás volver a los originales.`);
+      dlg.querySelector('[value="yes"]').disabled = spend > left;
+    };
+    const done = (ok) => {
+      dlg.close();
+      dlg.remove();
+      resolve(ok);
+    };
+    dlg.addEventListener('change', async (e) => {
+      if (e.target.dataset.aiChoice) await chooseAi(e.target);
+      draw();
+    });
+    dlg.addEventListener('click', (e) => {
+      if (e.target === dlg) return done(false);
+      const b = e.target.closest('button');
+      if (b?.value === 'yes') api.aiChoice({ style: dlg.querySelector('#askStyle').value }).then(() => done(true), (err) => (toast(err.message, 'error'), done(false)));
+      else if (b) done(false);
+    });
+    dlg.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      done(false);
+    });
+    draw();
+    dlg.showModal();
+  });
+}
+
+/** Mejora los dibujos con el estilo elegido, tras avisar de lo que gasta. Gasta créditos de verdad. */
+export async function improveWithAi(ex, onProgress, targets = null) {
+  const n = targets ? targets.length : ex.keyframes.filter((k) => k.img).length;
+  const free = state.ai.styles.find((s) => s.id === state.ai.style)?.free ? state.ai.style : null;
+  if (free) {
+    if (!await askModel(ex, n)) return;
+  } else {
+    const model = state.ai.models.find((m) => m.id === (ex.aiPrompt?.trim() ? state.ai.promptModel : state.ai.model));
+    const style = state.ai.styles.find((s) => s.id === state.ai.style);
+    const spend = n * model.cost;
+    const left = Math.max(0, state.ai.limit - state.ai.used) + (state.ai.extra || 0);
+    if (spend > left) return toast(`Necesitas ${spend} créditos y te quedan ${left} en este periodo`, 'error');
+    if (!await ask(`¿Mejorar con IA ${n === 1 ? 'el dibujo' : `los ${n} dibujos`} de «${ex.title}» con el estilo «${style.label}» y el motor ${model.label}? Gastarás ${spend} de tus ${left} créditos. Las imágenes se envían al servicio de IA en la nube (el video no). Podrás volver a los originales.`)) return;
+  }
+  try {
+    await improveDrawings(ex, onProgress, targets);
+    toast('Dibujos mejorados');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+  // Con Free elegido, el estilo de la ventana valía solo para esta vez.
+  if (free) await api.aiChoice({ style: free }).catch(() => {});
+  state.ai = await api.ai().catch(() => state.ai);
+  emit('ai');
+}
+
+export async function restoreDrawings(id) {
+  upsert('exercises', await api.restoreDrawings(id));
+  emit('data');
 }
 
 /**
@@ -82,7 +245,7 @@ export const shelves = () => [mainLibrary(), ...state.libraries.filter((l) => l.
   .map((l, i) => [l, l.order ?? (l.root ? -1 : 1e6 + i)])
   .sort((a, b) => a[1] - b[1])
   .map(([l]) => l);
-export const shelfName = (l) => (l?.root && (!l.name || l.name === 'General') ? 'Biblioteca' : l?.name || 'Biblioteca');
+export const shelfName = (l) => (l?.root && (!l.name || l.name === 'General') ? tr('Biblioteca') : l?.name || tr('Biblioteca'));
 /** La biblioteca abierta (se recuerda en este ordenador). */
 export function activeShelf() {
   let id = null;
@@ -145,10 +308,12 @@ export const videosDeep = (id) => {
   return state.videos.filter((v) => ids.has(v.libraryId)).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 };
 export const libraryLabel = (l) => {
-  if (isTop(l)) return `${shelfName(l)} (sin carpeta)`;
+  if (isTop(l)) return tr(`${shelfName(l)} (sin carpeta)`);
   const path = folderPath(l).map((x) => x.name).join(' › ') || l?.name || '';
   return shelves().length > 1 ? `${shelfName(shelfOf(l?.id))} › ${path}` : path;
 };
+/** Dónde se puede poner algo. La principal vacía va oculta, como en la barra de bibliotecas. */
+export const libraryChoices = () => [...shelves(), ...folders().sort((a, b) => libraryLabel(a).localeCompare(libraryLabel(b)))];
 
 // ---------- borrar ----------
 
@@ -170,32 +335,32 @@ async function afterDelete(ids) {
 }
 
 /** Borra videos (con sus ejercicios, que también salen de las rutinas). */
-export async function removeVideos(ids) {
+export async function removeVideos(ids, client = api) {
   if (!ids.length) return;
-  await api.deleteVideos(ids);
+  await client.deleteVideos(ids);
   await afterDelete(ids);
 }
 
 /** Borra bibliotecas con todos sus videos. Si no queda ninguna, el servidor deja una «General» vacía. */
-export async function removeLibraries(ids) {
+export async function removeLibraries(ids, client = api) {
   // Si se borran una carpeta y alguna de sus subcarpetas, basta con borrar la de fuera.
   const chosen = new Set(ids);
   const top = ids.filter((id) => !folderPath(libraryById(id)).slice(0, -1).some((a) => chosen.has(a.id)));
   const all = [...new Set(top.flatMap((id) => [id, ...descendantIds(id)]))];
   const videoIds = state.videos.filter((v) => all.includes(v.libraryId)).map((v) => v.id);
-  for (const id of top) await api.deleteLibrary(id);
+  for (const id of top) await client.deleteLibrary(id);
   await afterDelete([...all, ...videoIds]);
 }
 
 /** Mueve videos a una carpeta (o a la raíz). */
-export async function moveVideos(ids, libraryId) {
-  for (const id of ids) upsert('videos', await api.updateVideo(id, { libraryId }));
+export async function moveVideos(ids, libraryId, client = api) {
+  for (const id of ids) upsert('videos', await client.updateVideo(id, { libraryId }));
   emit('data');
 }
 
 /** Mete una carpeta dentro de otra (parentId null = en la Biblioteca). */
-export async function moveFolder(id, parentId) {
-  upsert('libraries', await api.updateLibrary(id, { parentId }));
+export async function moveFolder(id, parentId, client = api) {
+  upsert('libraries', await client.updateLibrary(id, { parentId }));
   emit('data');
 }
 
@@ -286,7 +451,7 @@ export function autoOrder(exercises) {
 
 // ---------- miniaturas ----------
 
-export const PLATFORM = { instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', vimeo: 'Vimeo', web: 'Link', local: 'Archivo' , cloud: 'Nube' };
+export const PLATFORM = { instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', x: 'X', vimeo: 'Vimeo', web: 'Link', local: 'Archivo' , cloud: 'Nube' };
 
 /** Dibujo representativo de un ejercicio (el momento clave del medio). */
 export function exerciseFigure(ex, size = 120, opts = {}) {
@@ -343,7 +508,7 @@ async function pumpPosters() {
     if (!v || v.poster || v.source.mediaType !== 'video' || !v.source.file) continue;
     try {
       const { file } = await api.uploadFrame(await capturePoster(mediaSrc(v)), 'portada.jpg');
-      upsert('videos', await api.updateVideo(id, { poster: file }));
+      upsert('videos', await api.updateVideoPoster(id, file));
       emit('poster', id);
     } catch (e) {
       posterFailed.add(id);
@@ -410,7 +575,7 @@ async function pumpDownloads() {
         netRetries.set(id, tries);
         setTimeout(() => queueDownload([id]), 5000 * tries);
       } else {
-        failed.push(`${v.title}: ${e.message}`);
+        failed.push(`${v.title}: ${tr(e.message)}`);
         upsert('videos', { ...v, source: { ...v.source, fetchError: e.message } });
         emit('data', id);
       }
@@ -537,7 +702,7 @@ export async function autoExtract(videoId, onProgress = () => {}) {
           : (await samplePoses(src, { start: s.start, end: s.end, maxFrames: 120, onProgress: (p) => onProgress(0.4 + (0.35 * (i + p)) / segs.length) })).frames;
       const r = analyze(frames, { count: 4 });
       if (!r.keyframes.length) continue;
-      found.push({ title: r.suggestedTitle || `Ejercicio ${i + 1}`, start: s.start, end: s.end, keyframes: r.keyframes, technique: r.technique, category: r.category });
+      found.push({ title: r.suggestedTitle || tr(`Ejercicio ${i + 1}`), start: s.start, end: s.end, keyframes: r.keyframes, technique: r.technique, category: r.category });
     }
   }
   if (!found.length) throw new Error('no se detectó a ninguna persona');
@@ -567,7 +732,7 @@ async function extractVideo(videoId, onProgress = () => {}) {
       try {
         await manualExtract(videoId, e.start, e.end ?? e.start + 3, { exerciseId: e.id, onProgress: (p) => onProgress((i + p) / marked.length) });
       } catch (err) {
-        failed.push(`${fmtTime(e.start)}–${fmtTime(e.end)}: ${err.message}`);
+        failed.push(`${fmtTime(e.start)}–${fmtTime(e.end)}: ${tr(err.message)}`);
       }
     }
     if (failed.length === marked.length) throw new Error(failed.join('; '));
@@ -582,13 +747,14 @@ async function extractVideo(videoId, onProgress = () => {}) {
  * Extracción manual de un tramo elegido en el timeline. Con exerciseId rehace ese
  * ejercicio (respetando título y categoría si se editaron a mano); si no, crea uno nuevo.
  */
-export async function manualExtract(videoId, start, end, { count = 4, exerciseId = null, onProgress } = {}) {
+export async function manualExtract(videoId, start, end, { count = 4, exerciseId = null, aiPrompt = '', onProgress } = {}) {
   const v = videoById(videoId);
   const { frames } = await samplePoses(mediaSrc(v), { start, end, maxFrames: 150, minStep: 0.1, onProgress: (p) => onProgress?.(p * 0.8) });
   if (!frames.length) throw new Error('no se detecta a ninguna persona en ese tramo');
   const r = analyze(frames, { count });
   await addIllustrations(v, r.keyframes, (p) => onProgress?.(0.8 + p * 0.2));
   const data = { start, end, mode: 'manual', keyframes: r.keyframes, technique: r.technique };
+  if (aiPrompt) data.aiPrompt = aiPrompt;
   const old = exerciseId && exerciseById(exerciseId);
   if (old) {
     if (!old.titleLocked) data.title = r.suggestedTitle || old.title;
@@ -596,7 +762,53 @@ export async function manualExtract(videoId, start, end, { count = 4, exerciseId
     return upsert('exercises', await api.updateExercise(old.id, data));
   }
   const n = exercisesOf(videoId).length + 1;
-  return upsert('exercises', await api.createExercise({ videoId, title: r.suggestedTitle || `Ejercicio ${n}`, category: r.category, ...data }));
+  return upsert('exercises', await api.createExercise({ videoId, title: r.suggestedTitle || tr(`Ejercicio ${n}`), category: r.category, ...data }));
+}
+
+/** Un dibujo más de la foto, en un ejercicio nuevo: los que ya tiene se quedan. */
+export async function imageExtract(videoId, { aiPrompt = '', onProgress } = {}) {
+  const v = videoById(videoId);
+  const pose = await detectPose(await loadImage(mediaSrc(v)));
+  if (!pose) throw new Error('no se detectó a ninguna persona');
+  const r = analyze([{ t: 0, ...pose }], { count: 1 });
+  await addIllustrations(v, r.keyframes, (p) => onProgress?.(0.3 + p * 0.7));
+  const base = r.suggestedTitle || v.title;
+  const taken = new Set(exercisesOf(videoId).map((e) => e.title));
+  let title = base;
+  for (let n = 2; taken.has(title); n++) title = `${base} ${n}`;
+  return upsert('exercises', await api.createExercise({ videoId, title, category: r.category, start: 0, end: 0, mode: 'manual', keyframes: r.keyframes, technique: r.technique, aiPrompt }));
+}
+
+/** Aviso antes de borrar dibujos: las rutinas que los usan, o que llevan viñetas suyas. */
+export function usedInRoutines(exIds) {
+  const files = new Set(exIds.flatMap((id) => (exerciseById(id)?.keyframes || []).map((k) => k.img)).filter(Boolean));
+  const names = state.routines
+    .filter((r) => r.items.some((it) => exIds.includes(it.exerciseId) || it.extra?.some((k) => files.has(k.img))))
+    .map((r) => `«${r.name}»`);
+  return names.length ? `Está en estas rutinas: ${names.join(', ')}.` : '';
+}
+
+/** Modo manual: una viñeta por cada fotograma elegido, en un ejercicio nuevo. */
+export async function framesExtract(videoId, times, { aiPrompt = '', onProgress } = {}) {
+  const v = videoById(videoId);
+  const frames = await posesAt(mediaSrc(v), times, (p) => onProgress?.(p * 0.7));
+  // Sin persona entera (unos pies, un detalle) la IA Premium dibuja lo que hay en el fotograma.
+  const style = state.ai?.styles.find((s) => s.id === state.ai.style);
+  const byAi = Boolean(state.ai?.premium && style && !style.free);
+  if (!frames.length && !byAi) throw new Error('no se detecta a ninguna persona en esos fotogramas');
+  const r = frames.length ? analyze(frames, { count: frames.length }) : null;
+  const keyframes = frames.map((f) => ({ t: f.t, aspect: Math.round(f.aspect * 1000) / 1000, lms: f.lms, label: labelPose(f.lms, f.aspect) }));
+  await addIllustrations(v, keyframes, (p) => onProgress?.(0.7 + p * 0.3));
+  if (byAi) {
+    for (const t of times.filter((x) => !frames.some((f) => f.t === Math.round(x * 100) / 100))) {
+      const { blob, aspect } = await frameBlob(mediaSrc(v), t);
+      keyframes.push({ t: Math.round(t * 100) / 100, aspect: Math.round(aspect * 1000) / 1000, img: (await api.uploadFrame(blob, 'fase.jpg')).file, label: '' });
+    }
+    keyframes.sort((a, b) => a.t - b.t);
+  }
+  const title = r?.suggestedTitle || `Ejercicio ${exercisesOf(videoId).length + 1}`;
+  const ex = upsert('exercises', await api.createExercise({ videoId, title, category: r?.category || '', start: keyframes[0].t, end: keyframes.at(-1).t, mode: 'manual', keyframes, technique: r?.technique || { summary: '', tags: [], cues: [] }, aiPrompt }));
+  return { ex, skipped: times.length - keyframes.length };
 }
 
 // ---------- selección y rutinas ----------
@@ -659,13 +871,15 @@ export async function extractSelection({ onStatus = () => {} } = {}) {
 }
 
 /** Ejercicios con dibujos (los que se ven en Rutinas → Dibujos), del más nuevo al más viejo. */
-export const drawings = () => state.exercises.filter((e) => e.keyframes?.length).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+// Los que aún no se han colocado a mano van delante, del más nuevo al más antiguo.
+export const drawings = () => state.exercises.filter((e) => e.keyframes?.length)
+  .sort((a, b) => (a.drawOrder ?? -1) - (b.drawOrder ?? -1) || String(b.createdAt).localeCompare(String(a.createdAt)));
 
 /**
  * Crea una rutina (o añade a una existente) con esos dibujos.
  * order: 'manual' (el orden en que se eligieron) | 'auto' (como una clase).
  */
-export async function routineFrom(exerciseIds, { name, order = 'manual', routineId = null }) {
+export async function routineFrom(exerciseIds, { name, order = 'manual', routineId = null, tableStyle = 'classic' }) {
   let exs = exerciseIds.map(exerciseById).filter(Boolean);
   if (!exs.length) throw new Error('Elige al menos un dibujo');
   if (order === 'auto') exs = autoOrder(exs);
@@ -675,7 +889,7 @@ export async function routineFrom(exerciseIds, { name, order = 'manual', routine
     const r = routineById(routineId);
     routine = await api.updateRoutine(routineId, { items: [...r.items, ...items] });
   } else {
-    routine = await api.createRoutine({ name, items });
+    routine = await api.createRoutine({ name, items, tableStyle });
   }
   upsert('routines', routine);
   return routine;
@@ -695,12 +909,12 @@ export async function setPinnedShelves(id, shelfIds) {
   emit('data');
 }
 /** Pone (en la biblioteca abierta) o quita (de todas, o de shelfId) unas rutinas. */
-export async function pinRoutines(ids, pinned, shelfId = null) {
+export async function pinRoutines(ids, pinned, shelfId = null, client = api) {
   for (const id of ids) {
     const r = state.routines.find((x) => x.id === id);
     const now = pinnedShelves(r);
     const next = pinned ? [...new Set([...now, activeShelf().id])] : shelfId ? now.filter((x) => x !== shelfId) : [];
-    upsert('routines', await api.updateRoutine(id, { pinnedIn: next, pinned: next.length > 0 }));
+    upsert('routines', await client.updateRoutine(id, { pinnedIn: next, pinned: next.length > 0 }));
   }
   emit('data');
 }

@@ -1,6 +1,7 @@
-// Ventana de YouTube, TikTok y Facebook: tutorial para conectar tu cuenta (pegando tu sesión,
+// Ventana de YouTube, TikTok, Facebook y X: tutorial para conectar tu cuenta (pegando tu sesión,
 // como con Instagram) e importar listas, que quedan enlazadas a una carpeta para sincronizarlas.
 import { api } from './api.js';
+import { lang, tr } from './i18n.js';
 import { state, emit, esc, toast, upsert, refresh, canDownload, queueDownload, libraryLabel, ask } from './store.js';
 
 export const NET_INFO = {
@@ -28,6 +29,14 @@ export const NET_INFO = {
     lists: null,
     why: 'Facebook no deja a otras apps leer tus listas ni tus «Guardados»: se importan los videos uno a uno pegando su link en «Importar». Conectando tu cuenta se pueden bajar también los de grupos o perfiles privados que tú ves.',
   },
+  x: {
+    name: 'X',
+    site: 'https://x.com/',
+    host: 'x.com',
+    color: '#71767b',
+    lists: null,
+    why: 'X no deja a otras apps leer tus listas ni tus «Guardados»: los videos se importan uno a uno pegando el link de la publicación en «Importar». Conectando tu cuenta se pueden bajar también los de publicaciones que X solo enseña con sesión iniciada.',
+  },
 };
 
 // ---------- dibujos del tutorial ----------
@@ -46,9 +55,10 @@ const page = (n) => `<rect x="14" y="42" width="22" height="16" rx="4" fill="${n
 const panel = (body) => `<rect x="146" y="32" width="172" height="166" fill="#f7f7f8" stroke="#cfd3da"/><rect x="146" y="32" width="172" height="18" fill="#eceef1"/>${body}`;
 const tabsRed = (hl) => {
   let x = 151;
+  const cjk = /^(ja|ko)$/.test(lang);
   return ['Elementos', 'Consola', 'Red', 'Aplicación'].map((t) => {
-    const w = t.length * 4.3;
-    const o = `${t === hl ? `<rect x="${x - 3}" y="34" width="${w + 6}" height="15" rx="3" fill="#c4553a"/>` : ''}<text x="${x}" y="45" font-size="7.5" fill="${t === hl ? '#fff' : '#444'}" font-weight="${t === hl ? 700 : 400}">${t}</text>`;
+    const w = tr(t).length * (cjk ? 6 : 4.3);
+    const o = `${t === hl ? `<rect x="${x - 3}" y="34" width="${w + 6}" height="15" rx="3" fill="#c4553a"/>` : ''}<text x="${x}" y="45" font-size="${cjk ? 6 : 7.5}" fill="${t === hl ? '#fff' : '#444'}" font-weight="${t === hl ? 700 : 400}">${t}</text>`;
     x += w + 9;
     return o;
   }).join('');
@@ -173,7 +183,7 @@ export function openNet(net, { view = null } = {}) {
       const { lists } = await api.youtubeLists();
       if (!dlg.open || !$('#mine')) return;
       $('#mine').innerHTML = `<h4 class="sh-sub">Tus listas</h4><ul class="ig-cols">${lists.map((l, i) => `
-        <li class="ig-col"><span class="ig-col-name">${esc(l.name)}</span>${l.libraries.length ? '<span class="hint">ya importada</span>' : ''}
+        <li class="ig-col"><span class="ig-col-name">${esc(/list=(WL|LL)$/.test(l.url) ? tr(l.name) : l.name)}</span>${l.libraries.length ? '<span class="hint">ya importada</span>' : ''}
           <button class="btn small" data-n="import-mine" data-i="${i}">${l.libraries.length ? 'Traer lo nuevo' : 'Importar'}</button></li>`).join('')}</ul>`;
       dlg._lists = lists;
     } catch (e) {

@@ -4,18 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Diva Routine</title>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/routine-styles.css">
   <link rel="icon" type="image/png" href="/logo.png">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#/biblioteca"><img class="brand-logo" src="/logo.png" alt=""> Diva Routine</a>
+    <a class="brand" href="#/biblioteca"><img class="brand-logo" src="/logo.png" alt=""><img class="brand-text" src="/logo-texto.png" alt="Diva Routine" title="Cambiar de logotipo"></a>
     <nav>
       <a href="#/biblioteca" data-nav="biblioteca">Bibliotecas</a>
       <a href="#/rutinas" data-nav="rutinas">Creador de rutinas</a>
+      <a href="#/todas" data-nav="todas">Rutinas</a>
+      <button id="navBack" class="nav-back" title="Volver" aria-label="Volver"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
     </nav>
     <span id="jobs" class="jobs" hidden></span>
     <a id="gsync" class="gsync" href="#/ajustes" hidden></a>
+    <a class="premium-link" href="#/ajustes" data-settings="premium" title="Premium" aria-label="Premium"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg></a>
     <a id="account" class="account" href="#/ajustes" data-nav="ajustes" title="Ajustes" aria-label="Ajustes"></a>
   </header>
   <main id="app" aria-live="polite"></main>

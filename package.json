@@ -1,7 +1,7 @@
 {
   "name": "diva-routine",
   "productName": "Diva Routine",
-  "version": "1.0.47",
+  "version": "1.0.78",
   "description": "Rutinas de entrenamiento de jazz: biblioteca de videos/links, extracción de técnica y tablas visuales",
   "author": "Divolandia",
   "private": true,
@@ -30,10 +30,13 @@
       "instagram.js",
       "social.js",
       "cloud.js",
+      "ai.js",
+      "backup.js",
       "public/**/*",
       "desktop/main.js",
       "desktop/icon.png",
-      "package.json"
+      "package.json",
+      "library-history.js"
     ],
     "extraResources": [
       {

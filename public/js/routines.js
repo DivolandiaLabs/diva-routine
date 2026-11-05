@@ -6,19 +6,29 @@ import { phasesSVG } from './figure.js';
 import {
   state, refresh, emit, esc, toast, fmtTime, exerciseById, videoById, routineById, exerciseFigure,
   ui, drawings, routineFrom, pinRoutines, removeRoutine, spaceFor, addedByOther, who, sharedLabel,
-  ask,
+  usedInRoutines, ask, shelves, shelfName, libraryById, pinnedShelves, setPinnedShelves, upsert,
 } from './store.js';
 import { openShare, SHARE_TAG } from './share.js';
+import { openLibraryPicker } from './picker.js';
+import { VIEWS, viewButtons, SORTS, SORT_ICON, PIN } from './views.js';
+import { lang, tr } from './i18n.js';
+import { normalizeTableStyle, tableStylePicker } from './routine-styles.js';
 
 const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICON = {
   create: svg('<path d="M9 6h11M9 12h11M9 18h6"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/><path d="M19 15v6M16 18h6"/>'),
   pin: svg('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/>'),
+  copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>'),
+  move: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13.5h6m-2-2 2 2-2 2"/>'),
+  undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   selectAll: svg('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>'),
   trash: svg('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),
   routine: svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>'),
   share: SHARE_TAG,
 };
+
+// Lo que Deshacer puede volver atrás: lo último, arriba.
+const undoStack = [];
 
 // Señal de compartido (con quién, o quién te lo compartió) en un recuadro.
 const shareTag = (type, r) => {
@@ -30,6 +40,13 @@ const shareTag = (type, r) => {
 
 export function renderRoutines(root) {
   const filters = { q: '' };
+  let sortBy = 'custom';
+  try {
+    const saved = localStorage.getItem('jr-sort-rutinas');
+    if (SORTS.some(([k]) => k === saved)) sortBy = saved;
+  } catch {
+    /* sin almacenamiento */
+  }
   // Dibujos elegidos para la rutina (en orden) y rutinas elegidas. Los recién sacados en la
   // Biblioteca llegan ya elegidos.
   const pickedEx = (ui.newDrawings || []).filter((id) => exerciseById(id));
@@ -41,10 +58,18 @@ export function renderRoutines(root) {
   root.innerHTML = `
     <div class="lib2">
       <section class="lib-main">
+        <div class="lib-sticky">
+        <nav class="shelf-bar" id="rtTabs" aria-label="Grupos de rutinas"></nav>
         <header class="lib-top">
-          <nav class="crumbs"><h2>Rutinas</h2></nav>
+          <nav class="crumbs" id="rtTitle"></nav>
           <input id="q" type="search" placeholder="Buscar dibujos o rutinas…" aria-label="Buscar">
+          <div class="lib-tools rt-tools">
+            <button class="pin-jump" id="pinJump" data-pin-jump disabled title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
+            <label class="sorter" title="Ordenar">${SORT_ICON}<select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+            <div class="views" id="views" role="group" aria-label="Vista">${viewButtons()}</div>
+          </div>
         </header>
+        </div>
         <h3 class="sec-title">Rutinas <small id="nRt"></small></h3>
         <div class="tiles" id="rtGrid"></div>
         <h3 class="sec-title">Dibujos <small id="nEx"></small></h3>
@@ -57,9 +82,183 @@ export function renderRoutines(root) {
   const $ = (s) => root.querySelector(s);
 
   const matches = (text) => !filters.q.trim() || text.toLowerCase().includes(filters.q.trim().toLowerCase());
-  const visibleRoutines = () => state.routines.filter((r) => matches(r.name));
+  const sorted = (list, nameOf, typeOf) => {
+    const name = (x) => String(nameOf(x) || '').toLocaleLowerCase(lang);
+    const sorter = {
+      new: (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
+      old: (a, b) => String(a.createdAt).localeCompare(String(b.createdAt)),
+      az: (a, b) => name(a).localeCompare(name(b), lang),
+      za: (a, b) => name(b).localeCompare(name(a), lang),
+      type: (a, b) => typeOf(a).localeCompare(typeOf(b), lang) || name(a).localeCompare(name(b), lang),
+    }[sortBy];
+    return sorter ? [...list].sort(sorter) : list;
+  };
+
+  // Pestañas de grupos: con libraryId, lo anclado a esa biblioteca; sin él, las rutinas que se le añadan.
+  let activeTab = '';
+  try {
+    activeTab = localStorage.getItem('jr-rt-tab') || '';
+  } catch {
+    /* sin almacenamiento */
+  }
+  const tabs = () => (state.routineTabs || []).filter((t) => !t.libraryId || libraryById(t.libraryId))
+    .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity));
+  const tabName = (t) => (t.libraryId ? shelfName(libraryById(t.libraryId)) : t.name);
+  const tabNow = () => tabs().find((t) => t.id === activeTab) || null;
+  const inTab = (r, t) => (t.libraryId ? pinnedShelves(r).includes(t.libraryId) : Boolean(r.tabs?.includes(t.id)));
+  const visibleRoutines = () => {
+    const tab = tabNow();
+    return sorted(state.routines.filter((r) => matches(r.name) && (!tab || inTab(r, tab))), (r) => r.name, () => '');
+  };
+  const remember = (undo) => {
+    undoStack.push(undo);
+    drawMenu();
+  };
+  // Para volver a dejar las rutinas en las pestañas y bibliotecas donde estaban.
+  const snapshot = (ids) => {
+    const was = ids.map((id) => ({ id, tabs: routineById(id)?.tabs || [], shelves: pinnedShelves(routineById(id)) }));
+    return async () => {
+      for (const w of was) {
+        if (!routineById(w.id)) continue;
+        await setPinnedShelves(w.id, w.shelves);
+        upsert('routines', await api.updateRoutine(w.id, { tabs: w.tabs }));
+      }
+    };
+  };
+
+  async function undoLast() {
+    const undo = undoStack.pop();
+    if (!undo) return;
+    try {
+      await undo();
+      toast('Cambio deshecho');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    drawGrids();
+  }
+
+  // El archivo de la viñeta se duplica: al borrar un dibujo se borran los suyos.
+  async function ownImage(file) {
+    const blob = await fetch(`/media/${encodeURI(file)}`).then((r) => r.blob());
+    return (await api.uploadFrame(blob, file)).file;
+  }
+
+  async function copyPicked() {
+    const made = { routines: [], exercises: [] };
+    try {
+      for (const id of pickedRt) {
+        const r = routineById(id);
+        const copy = upsert('routines', await api.createRoutine({ name: `${r.name} (${tr('copia')})`, subtitle: r.subtitle || '', items: r.items, notes: r.notes, tabs: r.tabs || [], tableStyle: normalizeTableStyle(r.tableStyle) }));
+        made.routines.push(copy.id);
+      }
+      for (const id of pickedEx) {
+        const e = exerciseById(id);
+        const keyframes = [];
+        for (const k of e.keyframes || []) {
+          const c = { ...k };
+          if (k.img) c.img = await ownImage(k.img);
+          if (k.origImg) c.origImg = await ownImage(k.origImg);
+          keyframes.push(c);
+        }
+        const { id: _id, pinnedTop: _pin, ...rest } = e;
+        const copy = upsert('exercises', await api.createExercise({ ...rest, title: `${e.title} (${tr('copia')})`, keyframes }));
+        made.exercises.push(copy.id);
+      }
+      toast('Copiado');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    if (made.routines.length || made.exercises.length) remember(async () => {
+      for (const id of made.routines) if (routineById(id)) await removeRoutine(id);
+      for (const id of made.exercises) if (exerciseById(id)) await api.deleteExercise(id);
+      await refresh();
+    });
+    pickedRt.length = pickedEx.length = 0;
+    drawGrids();
+  }
+
+  // Sale de la pestaña en la que estás y entra en la elegida.
+  function moveMenu(btn) {
+    document.querySelector('.pin-menu')?.remove();
+    const ids = [...pickedRt];
+    const from = tabNow();
+    const menu = document.createElement('div');
+    menu.className = 'pin-menu drop-menu';
+    menu.innerHTML = `<b>Mover a…</b>${tabs().filter((t) => t.id !== from?.id).map((t) => `<button data-to-tab="${t.id}">${esc(tabName(t))}</button>`).join('')}`;
+    document.body.append(menu);
+    const b = btn.getBoundingClientRect();
+    menu.style.top = `${Math.min(b.top, innerHeight - menu.offsetHeight - 12)}px`;
+    menu.style.left = `${Math.max(8, b.left - menu.offsetWidth - 8)}px`;
+    const close = () => {
+      menu.remove();
+      document.removeEventListener('mousedown', away, true);
+    };
+    const away = (ev) => {
+      if (!menu.contains(ev.target) && !btn.contains(ev.target)) close();
+    };
+    document.addEventListener('mousedown', away, true);
+    menu.addEventListener('click', async (e) => {
+      const to = tabs().find((t) => t.id === e.target.closest('[data-to-tab]')?.dataset.toTab);
+      if (!to) return;
+      close();
+      try {
+        remember(snapshot(ids));
+        for (const id of ids) {
+          const r = routineById(id);
+          if (from?.libraryId) await setPinnedShelves(id, pinnedShelves(r).filter((x) => x !== from.libraryId));
+          else if (from) upsert('routines', await api.updateRoutine(id, { tabs: (r.tabs || []).filter((x) => x !== from.id) }));
+          await putInTab(id, to);
+        }
+        toast(`Movido a «${tabName(to)}»`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      pickedRt.length = 0;
+      drawGrids();
+    });
+  }
+
+  // Menú con una casilla por biblioteca: las rutinas marcadas se ven arriba en las elegidas.
+  function shelfMenu(btn) {
+    document.querySelector('.pin-menu')?.remove();
+    const ids = [...pickedRt];
+    const has = (l) => ids.every((id) => pinnedShelves(routineById(id)).includes(l.id));
+    const menu = document.createElement('div');
+    menu.className = 'pin-menu drop-menu';
+    menu.innerHTML = `<b>Que se vea arriba en…</b>${shelves().map((l) => `<label><input type="checkbox" value="${l.id}" ${has(l) ? 'checked' : ''}> ${esc(shelfName(l))}</label>`).join('')}`;
+    document.body.append(menu);
+    const b = btn.getBoundingClientRect();
+    menu.style.top = `${Math.min(b.top, innerHeight - menu.offsetHeight - 12)}px`;
+    menu.style.left = `${Math.max(8, b.left - menu.offsetWidth - 8)}px`;
+    menu.addEventListener('change', async (e) => {
+      try {
+        remember(snapshot(ids));
+        for (const id of ids) {
+          const now = pinnedShelves(routineById(id)).filter((x) => x !== e.target.value);
+          await setPinnedShelves(id, e.target.checked ? [...now, e.target.value] : now);
+        }
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+    const away = (ev) => {
+      if (menu.contains(ev.target) || btn.contains(ev.target)) return;
+      menu.remove();
+      document.removeEventListener('mousedown', away, true);
+    };
+    document.addEventListener('mousedown', away, true);
+  }
+
+  async function putInTab(id, tab) {
+    const r = routineById(id);
+    if (!r || inTab(r, tab)) return;
+    if (tab.libraryId) await setPinnedShelves(id, [...pinnedShelves(r), tab.libraryId]);
+    else upsert('routines', await api.updateRoutine(id, { tabs: [...(r.tabs || []), tab.id] }));
+  }
+
   const visibleDrawings = () =>
-    drawings().filter((e) => matches([e.title, e.category, videoById(e.videoId)?.title, ...(e.technique?.tags || [])].join(' ')));
+    sorted(drawings().filter((e) => matches([e.title, e.category, videoById(e.videoId)?.title, ...(e.technique?.tags || [])].join(' '))), (e) => e.title, (e) => e.category || '');
 
   // ---------- recuadros ----------
 
@@ -67,8 +266,9 @@ export function renderRoutines(root) {
     const exs = r.items.map((it) => exerciseById(it.exerciseId)).filter(Boolean);
     const shown = exs.slice(0, 4);
     return `
-      <article class="tile tile-routine" data-kind="routine" data-id="${r.id}">
+      <article class="tile tile-routine" data-kind="routine" data-id="${r.id}" draggable="true">
         <label class="sel" title="Elegir (para la página principal o para borrar)"><input type="checkbox" data-sel-rt="${r.id}"><b class="order"></b></label>
+        <button class="card-pin${r.pinnedTop ? ' on' : ''}" data-pin-rt="${r.id}" title="${r.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${r.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(r.name)}" aria-pressed="${Boolean(r.pinnedTop)}">${PIN}</button>
         <button class="card-del" data-del-rt="${r.id}" title="Borrar esta rutina" aria-label="Borrar ${esc(r.name)}">✕</button>
         <a class="tile-thumb" href="#/rutina/${r.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((e) => `<span>${exerciseFigure(e, 120)}</span>`).join('')}</span>`
@@ -86,21 +286,158 @@ export function renderRoutines(root) {
       <span class="nr-plus">+</span><span>Nueva rutina</span><small>Arrastra aquí dibujos</small>
     </button>`;
 
+  // Primer recuadro de Dibujos: abre el buscador de lo importado.
+  const addDrawingTile = () => `
+    <button class="tile tile-new-routine tile-add-drawing" data-pick-library title="Busca en tus bibliotecas un video o una foto para sacar sus dibujos">
+      <span class="nr-plus">+</span><span>Añadir dibujo</span><small>Elige de tus bibliotecas</small>
+    </button>`;
+
   const drawingTile = (e) => {
     const v = videoById(e.videoId);
     const phases = phasesSVG(e.keyframes, { size: 120, numbers: false }).slice(0, 4);
     // Sin su video aquí (un dibujo que te compartieron): no hay video que abrir.
     const link = v ? `href="#/video/${e.videoId}" title="Abrir el video (para cambiar el tramo)"` : `data-share-ex="${e.id}" title="${esc(sharedLabel(spaceFor('drawing', e.id)) || 'Dibujo compartido contigo')}"`;
     return `
-      <article class="tile tile-drawing ${fresh.has(e.id) ? 'new' : ''}" data-kind="drawing" data-id="${e.id}" draggable="true" title="Arrastra a una rutina para añadirlo">
+      <article class="tile tile-drawing ${fresh.has(e.id) ? 'new' : ''}" data-kind="drawing" data-id="${e.id}" draggable="true" title="Arrastra a una rutina para añadirlo, o sobre otro dibujo para cambiar su orden">
         <label class="sel" title="Elegir para la rutina (el número es su orden)"><input type="checkbox" data-sel-ex="${e.id}"><b class="order"></b></label>
+        <button class="card-pin${e.pinnedTop ? ' on' : ''}" data-pin-ex="${e.id}" title="${e.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${e.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(e.title)}" aria-pressed="${Boolean(e.pinnedTop)}">${PIN}</button>
         <button class="card-del" data-del-ex="${e.id}" title="Borrar este dibujo (sale también de las rutinas)" aria-label="Borrar ${esc(e.title)}">✕</button>
         <a class="tile-thumb" ${link}><span class="mosaic m${phases.length}">${phases.map((p) => `<span>${p.svg}</span>`).join('')}</span></a>
-        <a class="tile-body" ${link}>
-          <h3><span>${esc(e.title)}</span></h3>
-          <div class="meta">${e.category ? `<span>${esc(e.category)}</span>` : ''}${v ? `<span>${esc(v.title.slice(0, 28))}${v.source.mediaType === 'video' && e.end != null ? ` · ${fmtTime(e.start)}–${fmtTime(e.end)}` : ''}</span>` : ''}${shareTag('drawing', e)}</div>
-        </a>
+        <div class="tile-body">
+          <h3><span data-edit-ex="title" contenteditable="plaintext-only" spellcheck="false" title="Clic para editar">${esc(e.title)}</span></h3>
+          <div class="meta">${e.category ? `<span data-edit-ex="category" contenteditable="plaintext-only" spellcheck="false" title="Clic para editar">${esc(tr(e.category))}</span>` : ''}${v || e.srcLabel ? `<span class="tile-src" data-edit-ex="srcLabel" contenteditable="plaintext-only" spellcheck="false" title="Clic para editar">${esc(e.srcLabel ?? `${v.title.slice(0, 28)}${v.source.mediaType === 'video' && e.end != null ? ` · ${fmtTime(e.start)}–${fmtTime(e.end)}` : ''}`)}</span>` : ''}${shareTag('drawing', e)}</div>
+        </div>
       </article>`;
+  };
+
+  // La misma barra que Bibliotecas. Una pestaña con biblioteca se llama como ella: su nombre se cambia allí.
+  const drawTabs = () => {
+    const tab = tabNow();
+    $('#rtTabs').innerHTML = `
+      <button class="shelf-pill${tab ? '' : ' on'}" data-rt-tab="">${esc(tr('Todas las Rutinas'))}</button>
+      ${tabs().map((t) => `<button class="shelf-pill${t === tab ? ' on' : ''}" data-rt-tab="${t.id}" data-drop-tab="${t.id}" draggable="true" title="${t === tab && !t.libraryId ? 'Haz clic para cambiar el nombre · arrastra para moverla' : 'Arrastra para moverla'}">${esc(tabName(t))}</button>`).join('')}
+      <button class="shelf-add" data-rt-tab-add title="Añadir pestaña de rutinas" aria-label="Añadir pestaña de rutinas">+</button>`;
+    $('#rtTitle').innerHTML = tab
+      ? `<h2 class="shelf-tab on"><span class="shelf-name" id="rtName"${tab.libraryId ? '' : ' data-rt-rename title="Haz clic para cambiar el nombre"'}>${esc(tabName(tab))}</span><button class="shelf-del" data-rt-tab-del="${tab.id}" title="Quitar pestaña" aria-label="Quitar pestaña">✕</button></h2>`
+      : '<h2>Todas las Rutinas</h2>';
+  };
+
+  function renameTab(tab) {
+    if (!tab || tab.libraryId) return;
+    const title = $('#rtTitle .shelf-tab');
+    if (!title || title.querySelector('input')) return;
+    const input = document.createElement('input');
+    input.className = 'tile-rename';
+    input.value = tab.name;
+    input.maxLength = 40;
+    input.setAttribute('aria-label', 'Nuevo nombre');
+    title.classList.add('renaming');
+    title.append(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const name = input.value.trim();
+      try {
+        if (save && name && name !== tab.name) upsert('routineTabs', await api.renameRoutineTab(tab.id, name));
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      drawTabs();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  async function moveTab(id, beforeId) {
+    const ids = tabs().map((t) => t.id).filter((x) => x !== id);
+    ids.splice(ids.indexOf(beforeId), 0, id);
+    ids.forEach((tabId, i) => (state.routineTabs.find((t) => t.id === tabId).order = i));
+    drawTabs();
+    try {
+      await api.orderRoutineTabs(ids);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  const selectTab = (id) => {
+    activeTab = id;
+    try {
+      localStorage.setItem('jr-rt-tab', id);
+    } catch {
+      /* solo esta vez */
+    }
+    drawTabs();
+    drawGrids();
+  };
+
+  async function addTab(data) {
+    try {
+      const tab = await api.createRoutineTab(data);
+      state.routineTabs ||= [];
+      upsert('routineTabs', tab);
+      selectTab(tab.id);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  function openTabMenu(btn) {
+    document.getElementById('rtTabMenu')?.remove();
+    const menu = document.createElement('div');
+    menu.id = 'rtTabMenu';
+    menu.className = 'drop-menu rt-tab-menu';
+    const taken = new Set(tabs().map((t) => t.libraryId));
+    const libs = shelves().filter((l) => !taken.has(l.id));
+    menu.innerHTML = `${libs.map((l) => `<button class="rt-menu-lib" data-tab-lib="${l.id}">${esc(shelfName(l))}</button>`).join('')}
+      ${libs.length ? '<span class="opt-sep"></span>' : ''}
+      <button data-tab-new>Nueva pestaña de rutinas</button>`;
+    document.body.append(menu);
+    const b = btn.getBoundingClientRect();
+    menu.style.left = `${Math.min(b.left, innerWidth - menu.offsetWidth - 12)}px`;
+    menu.style.top = `${b.bottom + 6}px`;
+    const away = (ev) => {
+      if (menu.contains(ev.target)) return;
+      close();
+    };
+    const close = () => {
+      menu.remove();
+      document.removeEventListener('mousedown', away, true);
+    };
+    document.addEventListener('mousedown', away, true);
+    menu.addEventListener('click', (e) => {
+      const lib = e.target.closest('[data-tab-lib]')?.dataset.tabLib;
+      if (lib) {
+        close();
+        return addTab({ libraryId: lib });
+      }
+      if (!e.target.closest('[data-tab-new]')) return;
+      menu.innerHTML = '<input id="rtTabName" maxlength="40" placeholder="Nombre de la pestaña" aria-label="Nombre de la pestaña">';
+      const input = menu.querySelector('#rtTabName');
+      input.focus();
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') close();
+        if (ev.key !== 'Enter' || !input.value.trim()) return;
+        close();
+        addTab({ name: input.value });
+      });
+    });
+  }
+
+  const setSort = (v) => {
+    sortBy = v;
+    $('#sortBy').value = v;
+    try {
+      localStorage.setItem('jr-sort-rutinas', v);
+    } catch {
+      /* solo esta vez */
+    }
   };
 
   const drawGrids = () => {
@@ -108,13 +445,43 @@ export function renderRoutines(root) {
     const exs = visibleDrawings();
     $('#nRt').textContent = `(${rts.length})`;
     $('#nEx').textContent = `(${exs.length})`;
-    $('#rtGrid').innerHTML = rts.map(routineTile).join('') + newRoutineTile()
+    $('#rtGrid').innerHTML = newRoutineTile() + rts.map(routineTile).join('')
       + (!rts.length && state.routines.length ? '<p class="hint">Ninguna rutina coincide con la búsqueda.</p>' : '');
     $('#exHint').innerHTML = drawings().length
       ? '<b>Arrastra</b> un dibujo hasta una rutina para añadirlo (si tienes varios marcados, van todos, en su orden), o márcalos en orden y pulsa <b>Rutina</b>.'
       : 'Aún no hay dibujos. En la <a href="#/biblioteca">Biblioteca</a> selecciona videos o carpetas y pulsa <b>Dibujos</b>.';
-    $('#exGrid').innerHTML = exs.map(drawingTile).join('');
+    $('#exGrid').innerHTML = addDrawingTile() + exs.map(drawingTile).join('');
     drawPicks();
+    drawJump();
+  };
+
+  // Acceso a lo anclado, como en Bibliotecas: cada clic salta al siguiente y lo resalta.
+  let pinCursor = -1;
+  const pinnedTiles = () => [...root.querySelectorAll('#rtGrid .tile:has(.card-pin.on), #exGrid .tile:has(.card-pin.on)')];
+  const drawJump = (at = 0) => {
+    const tiles = pinnedTiles();
+    const jump = $('#pinJump');
+    jump.disabled = !tiles.length;
+    if (!tiles.length) {
+      jump.querySelector('b').textContent = tr('Nada anclado');
+      jump.title = jump.ariaLabel = tr('Pasa el ratón por una rutina o un dibujo y pulsa su pin');
+      return;
+    }
+    const name = tiles[Math.min(at, tiles.length - 1)].querySelector('h3 span')?.textContent || '';
+    jump.querySelector('b').textContent = name;
+    jump.title = jump.ariaLabel = tiles.length > 1 ? `Ir a «${name}» (anclado ${Math.min(at, tiles.length - 1) + 1} de ${tiles.length})` : `Ir a «${name}»`;
+  };
+  const jumpToPinned = () => {
+    const tiles = pinnedTiles();
+    if (!tiles.length) return;
+    pinCursor = (pinCursor + 1) % tiles.length;
+    const tile = tiles[pinCursor];
+    tile.classList.remove('pin-flash');
+    void tile.offsetWidth; // reinicia la animación si se vuelve a saltar al mismo
+    tile.classList.add('pin-flash');
+    tile.addEventListener('animationend', () => tile.classList.remove('pin-flash'), { once: true });
+    drawJump(pinCursor);
+    tile.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
 
   const drawPicks = () => {
@@ -145,7 +512,10 @@ export function renderRoutines(root) {
       </button>`;
     $('#opts').innerHTML = [
       item('create', 'Rutina', { badge: pickedEx.length, ready: pickedEx.length > 0 && panel !== 'create', title: 'Montar una rutina con los dibujos elegidos' }),
-      item('pin', allPinned ? 'Quitar' : 'Inicio', { badge: pickedRt.length, disabled: !pickedRt.length, title: allPinned ? 'Quitar las rutinas elegidas de la página principal' : 'Añadir las rutinas elegidas a la página principal' }),
+      item('pin', 'Bibliotecas', { badge: pickedRt.length, disabled: !pickedRt.length, title: 'Elegir en qué bibliotecas se ven las rutinas marcadas' }),
+      item('copy', 'Copiar', { badge: pickedEx.length + pickedRt.length, disabled: !(pickedEx.length + pickedRt.length), title: 'Duplicar las rutinas y dibujos marcados' }),
+      item('move', 'Mover', { badge: pickedRt.length, disabled: !pickedRt.length, title: 'Mover las rutinas marcadas a otra pestaña' }),
+      item('undo', 'Deshacer', { disabled: !undoStack.length, title: 'Deshacer el último cambio' }),
       item('share', 'Compartir', {
         disabled: !target,
         title: !target ? 'Elige un dibujo o una rutina para compartirlo con otras personas'
@@ -158,29 +528,48 @@ export function renderRoutines(root) {
   };
 
   let busy = null; // texto mientras se crea la rutina
+  let createTableStyle = 'classic';
+  root.addEventListener('change', (e) => {
+    if (e.target.matches('[name="newRoutineTableStyle"]')) createTableStyle = normalizeTableStyle(e.target.value);
+  });
+  let pickQ = '';
+  const filterPick = () => {
+    const q = pickQ.trim().toLocaleLowerCase(lang);
+    root.querySelectorAll('.rp-pick-list label').forEach((l) => (l.hidden = !l.dataset.q.includes(q)));
+  };
+
   const drawPanel = () => {
     const box = $('#panel');
     box.hidden = panel !== 'create';
     if (box.hidden) return drawMenu();
     const keep = {};
     box.querySelectorAll('input, select').forEach((el) => el.id && (keep[el.id] = el.value));
+    const pickScroll = box.querySelector('.rp-pick-list')?.scrollTop || 0;
     const target = ui.routineTarget && routineById(ui.routineTarget);
     const names = pickedEx.map(exerciseById).filter(Boolean);
     box.innerHTML = `
       <header><h3>${target ? `Añadir a «${esc(target.name)}»` : 'Crear rutina'}</h3><button class="x" data-close aria-label="Cerrar">✕</button></header>
       ${names.length
         ? `<ol class="rp-list">${names.map((e) => `<li><span class="rp-t">${esc(e.title)}</span><span class="rp-s">${esc(e.category || '')}</span></li>`).join('')}</ol>`
-        : '<p class="hint">Marca abajo, en <b>Dibujos</b>, los que quieras en la rutina, en orden.</p>'}
+        : ''}
+      <div class="rp-pick">
+        <input id="pickQ" type="search" placeholder="Buscar dibujos…" aria-label="Buscar dibujos…" value="${esc(pickQ)}">
+        <div class="rp-pick-list">${drawings().map((e) => `<label data-q="${esc(`${e.title} ${e.category || ''}`.toLocaleLowerCase(lang))}"><input type="checkbox" data-sel-ex="${e.id}" ${pickedEx.includes(e.id) ? 'checked' : ''}><span class="rp-t">${esc(e.title)}</span><span class="rp-s">${esc(e.category || '')}</span></label>`).join('')}</div>
+      </div>
       <label class="field">Orden<select id="order">
         <option value="manual">Como los he elegido</option>
         <option value="auto">Automático (como una clase)</option>
       </select></label>
+      <label class="field" id="toTabBox">Pestaña<select id="toTab"><option value="">Todas las Rutinas</option>${tabs().map((t) => `<option value="${t.id}" ${t.id === activeTab ? 'selected' : ''}>${esc(tabName(t))}</option>`).join('')}</select></label>
       <label class="field">En<select id="toRoutine"><option value="">Rutina nueva</option>${state.routines.map((r) => `<option value="${r.id}" ${r.id === target?.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
-      <label class="field" id="rnameField">Nombre<input id="rname" value="${esc(`Rutina ${new Date().toLocaleDateString('es-ES')}`)}"></label>
+      <label class="field" id="rnameField">Nombre<input id="rname" value="${esc(tr(`Rutina ${new Date().toLocaleDateString(lang)}`))}"></label>
+      <div id="newRoutineStyle">${tableStylePicker(createTableStyle, 'newRoutineTableStyle')}</div>
       <div class="row wrap">
         <button class="btn primary" data-act="create" ${names.length && !busy ? '' : 'disabled'}>${busy ? esc(busy) : 'Crear rutina'}</button>
         ${names.length ? '<button class="btn ghost" data-act="clear">Quitar selección</button>' : ''}
       </div>`;
+    box.querySelector('.rp-pick-list').scrollTop = pickScroll;
+    filterPick();
     for (const [id, value] of Object.entries(keep)) {
       const el = box.querySelector('#' + id);
       if (el && [...(el.options || [{ value }])].some((o) => o.value === value)) el.value = value;
@@ -192,7 +581,9 @@ export function renderRoutines(root) {
   const syncTarget = () => {
     const sel = $('#toRoutine');
     if (!sel) return;
+    $('#toTabBox').hidden = Boolean(sel.value);
     $('#rnameField').hidden = Boolean(sel.value);
+    $('#newRoutineStyle').hidden = Boolean(sel.value);
     if (!busy) $('[data-act="create"]').textContent = sel.value ? 'Añadir a la rutina' : 'Crear rutina';
   };
 
@@ -207,14 +598,25 @@ export function renderRoutines(root) {
 
   async function deletePicked(exIds, rtIds) {
     const parts = [];
-    if (exIds.length) parts.push(`${exIds.length} dibujo${exIds.length === 1 ? '' : 's'}`);
-    if (rtIds.length) parts.push(`${rtIds.length} rutina${rtIds.length === 1 ? '' : 's'}`);
+    if (exIds.length) parts.push(tr(`${exIds.length} dibujo${exIds.length === 1 ? '' : 's'}`));
+    if (rtIds.length) parts.push(tr(`${rtIds.length} rutina${rtIds.length === 1 ? '' : 's'}`));
     if (!parts.length) return;
     // Lo que te compartieron no se borra para nadie: sales de ello.
     const received = (type, id) => (spaceFor(type, id) && !spaceFor(type, id).mine ? spaceFor(type, id) : null);
     const nLeave = exIds.filter((id) => received('drawing', id)).length + rtIds.filter((id) => received('routine', id)).length;
     const shared = exIds.some((id) => spaceFor('drawing', id)?.mine) || rtIds.some((id) => spaceFor('routine', id)?.mine);
-    if (!await ask(`¿Borrar ${parts.join(' y ')}?${exIds.length ? ' Los dibujos borrados salen también de las rutinas (los videos no se borran).' : ''}${nLeave ? ` De ${nLeave === 1 ? 'lo que te compartieron' : `las ${nLeave} cosas que te compartieron`}, solo sales tú.` : ''}${shared ? ' Lo que compartes dejará de verse para los demás.' : ''} No se puede deshacer.`)) return;
+    if (!await ask([
+      tr(`¿Borrar ${parts.join(` ${tr('y')} `)}?`),
+      exIds.length && tr('Los dibujos borrados salen también de las rutinas (los videos no se borran).'),
+      tr(usedInRoutines(exIds)),
+      nLeave && tr(`De ${nLeave === 1 ? 'lo que te compartieron' : `las ${nLeave} cosas que te compartieron`}, solo sales tú.`),
+      shared && tr('Lo que compartes dejará de verse para los demás.'),
+      tr(nLeave || shared ? 'No se puede deshacer.' : 'Puedes deshacerlo hasta cerrar la app.'),
+    ].filter(Boolean).join(' '))) return;
+    const undoable = !nLeave && !shared;
+    const goneEx = exIds.map(exerciseById).filter(Boolean);
+    const goneRt = rtIds.map(routineById).filter(Boolean);
+    const touched = state.routines.filter((r) => !rtIds.includes(r.id) && r.items.some((it) => exIds.includes(it.exerciseId))).map((r) => ({ id: r.id, items: r.items }));
     try {
       for (const id of exIds) {
         const sp = received('drawing', id);
@@ -227,7 +629,17 @@ export function renderRoutines(root) {
       await refresh();
       for (const list of [pickedEx, pickedRt]) for (let i = list.length - 1; i >= 0; i--) if (!exerciseById(list[i]) && !routineById(list[i])) list.splice(i, 1);
       emit('data');
-      toast(`Borrado: ${parts.join(' y ')}`);
+      toast(`Borrado: ${parts.join(` ${tr('y')} `)}`);
+      if (undoable) remember(async () => {
+        await api.restoreFrames(goneEx.flatMap((e) => (e.keyframes || []).flatMap((k) => [k.img, k.origImg])).filter(Boolean));
+        // Vuelven con otro id: las rutinas apuntan al nuevo.
+        const ids = {};
+        for (const e of goneEx) ids[e.id] = upsert('exercises', await api.createExercise(e)).id;
+        const mapped = (items) => items.map((it) => ({ ...it, exerciseId: ids[it.exerciseId] || it.exerciseId }));
+        for (const r of goneRt) upsert('routines', await api.createRoutine({ ...r, items: mapped(r.items) }));
+        for (const r of touched) if (routineById(r.id)) upsert('routines', await api.updateRoutine(r.id, { items: mapped(r.items) }));
+        await refresh();
+      });
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -235,6 +647,10 @@ export function renderRoutines(root) {
 
   root.addEventListener('change', (e) => {
     const t = e.target;
+    if (t.id === 'sortBy') {
+      setSort(t.value);
+      return drawGrids();
+    }
     const toggle = (list, id) => {
       const i = list.indexOf(id);
       if (i >= 0) list.splice(i, 1);
@@ -247,10 +663,50 @@ export function renderRoutines(root) {
     else if (t.id === 'toRoutine') syncTarget();
   });
 
+  root.addEventListener('input', (e) => {
+    if (e.target.id !== 'pickQ') return;
+    pickQ = e.target.value;
+    filterPick();
+  });
+
   root.addEventListener('click', async (e) => {
     const t = e.target;
     if (t.closest('[data-close]')) return ((panel = null), drawPanel());
     if (t.closest('[data-new-routine]')) return ((panel = 'create'), drawPanel());
+    if (t.closest('[data-pick-library]')) return openLibraryPicker();
+    if (t.closest('[data-pin-jump]')) return jumpToPinned();
+    const pin = t.closest('[data-pin-rt], [data-pin-ex]');
+    if (pin) {
+      e.preventDefault();
+      try {
+        if (pin.dataset.pinRt) upsert('routines', await api.updateRoutine(pin.dataset.pinRt, { pinnedTop: !routineById(pin.dataset.pinRt).pinnedTop }));
+        else upsert('exercises', await api.updateExercise(pin.dataset.pinEx, { pinnedTop: !exerciseById(pin.dataset.pinEx).pinnedTop }));
+        pinCursor = -1;
+        drawGrids();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
+    if (t.closest('[data-rt-tab-add]')) return openTabMenu(t.closest('[data-rt-tab-add]'));
+    const delTab = t.closest('[data-rt-tab-del]')?.dataset.rtTabDel;
+    if (delTab) {
+      if (!await ask('¿Quitar esta pestaña? Las rutinas no se borran.')) return;
+      try {
+        await api.deleteRoutineTab(delTab);
+        state.routineTabs = state.routineTabs.filter((x) => x.id !== delTab);
+        for (const r of state.routines) if (r.tabs?.includes(delTab)) r.tabs = r.tabs.filter((x) => x !== delTab);
+        return selectTab(activeTab === delTab ? '' : activeTab);
+      } catch (err) {
+        return toast(err.message, 'error');
+      }
+    }
+    if (t.closest('[data-rt-rename]')) return renameTab(tabNow());
+    const tabBtn = t.closest('[data-rt-tab]');
+    if (tabBtn) {
+      if (tabBtn.dataset.rtTab && tabBtn.dataset.rtTab === activeTab) return renameTab(tabNow());
+      return selectTab(tabBtn.dataset.rtTab);
+    }
     const shareEx = t.closest('[data-share-ex]');
     if (shareEx) return openShare('drawing', shareEx.dataset.shareEx);
     const delEx = t.closest('[data-del-ex]');
@@ -260,14 +716,10 @@ export function renderRoutines(root) {
 
     const menu = t.closest('[data-menu]')?.dataset.menu;
     if (menu === 'create') return ((panel = panel === 'create' ? null : 'create'), drawPanel());
-    if (menu === 'pin') {
-      const allPinned = pickedRt.every((id) => routineById(id)?.pinned);
-      const n = pickedRt.length;
-      await pinRoutines([...pickedRt], !allPinned);
-      pickedRt.length = 0;
-      drawGrids();
-      return toast(allPinned ? `${n} rutina(s) quitada(s) de la página principal` : `${n} rutina(s) añadida(s) a la página principal`);
-    }
+    if (menu === 'pin') return shelfMenu(t.closest('[data-menu]'));
+    if (menu === 'copy') return copyPicked();
+    if (menu === 'move') return moveMenu(t.closest('[data-menu]'));
+    if (menu === 'undo') return undoLast();
     if (menu === 'selectAll') {
       const ids = visibleDrawings().map((x) => x.id);
       const all = ids.length && ids.every((id) => pickedEx.includes(id));
@@ -296,7 +748,10 @@ export function renderRoutines(root) {
           name: $('#rname').value.trim() || 'Rutina',
           order: $('#order').value,
           routineId: $('#toRoutine').value || null,
+          tableStyle: createTableStyle,
         });
+        const chosen = tabs().find((x) => x.id === $('#toTab').value);
+        if (chosen) await putInTab(routine.id, chosen);
         ui.routineTarget = null;
         location.hash = `#/rutina/${routine.id}`;
       } catch (err) {
@@ -311,22 +766,109 @@ export function renderRoutines(root) {
 
   const DRAG_TYPE = 'application/x-jazz-dibujos';
   let dragged = null; // ids que se están arrastrando
+  let draggedRt = null; // rutina que se lleva a una pestaña
+  let draggedTab = null; // pestaña que se cambia de sitio
+
+  // Los textos de un dibujo se editan encima: Intro guarda, Esc deja lo que había.
+  let editStart = '';
+  root.addEventListener('focusin', (e) => {
+    if (e.target.dataset?.editEx) editStart = e.target.textContent;
+  });
+  root.addEventListener('mousedown', (e) => {
+    const tile = e.target.closest?.('.tile-drawing');
+    if (tile) tile.draggable = !e.target.dataset?.editEx;
+  });
+  root.addEventListener('keydown', (e) => {
+    if (!e.target.dataset?.editEx || (e.key !== 'Enter' && e.key !== 'Escape')) return;
+    e.preventDefault();
+    if (e.key === 'Escape') e.target.textContent = editStart;
+    e.target.blur();
+  });
+  root.addEventListener('focusout', async (e) => {
+    const field = e.target.dataset?.editEx;
+    if (!field) return;
+    e.target.closest('.tile-drawing').draggable = true;
+    const text = e.target.textContent.trim();
+    if (!text || text === editStart.trim()) {
+      e.target.textContent = editStart;
+      return;
+    }
+    const patch = { [field]: text };
+    if (field === 'title') patch.titleLocked = true;
+    if (field === 'category') patch.categoryLocked = true;
+    try {
+      const id = e.target.closest('.tile-drawing').dataset.id;
+      const old = exerciseById(id);
+      const back = Object.fromEntries(Object.keys(patch).map((k) => [k, old[k] ?? (k === 'srcLabel' ? null : false)]));
+      upsert('exercises', await api.updateExercise(id, patch));
+      remember(async () => upsert('exercises', await api.updateExercise(id, back)));
+    } catch (err) {
+      e.target.textContent = editStart;
+      toast(err.message, 'error');
+    }
+  });
 
   root.addEventListener('dragstart', (e) => {
+    const pill = e.target.closest?.('[data-drop-tab]');
+    if (pill) {
+      draggedTab = pill.dataset.dropTab;
+      e.dataTransfer.effectAllowed = 'move';
+      return;
+    }
+    const rt = e.target.closest?.('.tile-routine');
+    if (rt) {
+      draggedRt = rt.dataset.id;
+      e.dataTransfer.effectAllowed = 'move';
+      root.classList.add('drag-tab');
+      return;
+    }
     const tile = e.target.closest?.('.tile-drawing');
     if (!tile) return;
     // Si el dibujo está entre los marcados, se llevan todos los marcados (en su orden).
     dragged = pickedEx.includes(tile.dataset.id) && pickedEx.length > 1 ? [...pickedEx] : [tile.dataset.id];
     e.dataTransfer.clearData();
     e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(dragged));
-    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.effectAllowed = 'copyMove';
     e.dataTransfer.setDragImage(tile, 40, 40);
     root.querySelectorAll('.tile-drawing').forEach((t) => t.classList.toggle('dragging', dragged.includes(t.dataset.id)));
     root.classList.add('drag-active');
   });
 
-  const dropTarget = (e) => e.target.closest?.('.tile-routine, .tile-new-routine');
+  const dropTarget = (e) => e.target.closest?.('.tile-routine, [data-new-routine]');
+
+  // Soltar sobre otro dibujo lo coloca antes o después de él, según el lado.
+  const drawingTarget = (e) => {
+    const t = dragged && e.target.closest?.('.tile-drawing');
+    return t && !dragged.includes(t.dataset.id) ? t : null;
+  };
+  const clearSlots = (keep) => root.querySelectorAll('.drop-before, .drop-after').forEach((x) => x !== keep && x.classList.remove('drop-before', 'drop-after'));
+  async function placeDrawings(ids, targetId, after) {
+    setSort('custom'); // colocar a mano es «Mi orden»
+    const rest = drawings().map((d) => d.id).filter((id) => !ids.includes(id));
+    rest.splice(rest.indexOf(targetId) + (after ? 1 : 0), 0, ...ids);
+    rest.forEach((id, i) => (exerciseById(id).drawOrder = i));
+    drawGrids();
+    try {
+      await api.orderExercises(rest);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  const tabTarget = (e) => (draggedRt || draggedTab ? e.target.closest?.('[data-drop-tab]') : null);
   root.addEventListener('dragover', (e) => {
+    if (tabTarget(e)) e.preventDefault();
+    const slot = drawingTarget(e);
+    clearSlots(slot);
+    if (slot) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const box = slot.getBoundingClientRect();
+      const after = view === 'details' ? e.clientY > box.top + box.height / 2 : e.clientX > box.left + box.width / 2;
+      slot.classList.toggle('drop-after', after);
+      slot.classList.toggle('drop-before', !after);
+      return;
+    }
     const t = dropTarget(e);
     if (!t || !dragged) return;
     e.preventDefault();
@@ -340,20 +882,49 @@ export function renderRoutines(root) {
   });
   const endDrag = () => {
     dragged = null;
+    draggedRt = null;
+    draggedTab = null;
+    root.classList.remove('drag-tab');
     root.classList.remove('drag-active');
     root.querySelectorAll('.drop-over, .dragging').forEach((x) => x.classList.remove('drop-over', 'dragging'));
+    clearSlots();
   };
   root.addEventListener('dragend', endDrag);
 
   root.addEventListener('drop', async (e) => {
+    const tabEl = tabTarget(e);
+    if (tabEl) {
+      e.preventDefault();
+      const id = draggedRt;
+      const moved = draggedTab;
+      const tab = tabs().find((x) => x.id === tabEl.dataset.dropTab);
+      endDrag();
+      if (moved) return moved !== tab.id && moveTab(moved, tab.id);
+      try {
+        await putInTab(id, tab);
+        toast(`Añadida a «${tabName(tab)}»`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return drawGrids();
+    }
+    const slot = drawingTarget(e);
+    if (slot) {
+      e.preventDefault();
+      const ids = [...dragged];
+      const after = slot.classList.contains('drop-after');
+      endDrag();
+      return placeDrawings(ids, slot.dataset.id, after);
+    }
     const t = dropTarget(e);
     if (!t || !dragged) return;
     e.preventDefault();
     const ids = dragged.filter((id) => exerciseById(id));
     endDrag();
     try {
-      if (t.matches('.tile-new-routine')) {
-        const r = await routineFrom(ids, { name: `Rutina ${new Date().toLocaleDateString('es-ES')}` });
+      if (t.matches('[data-new-routine]')) {
+        const r = await routineFrom(ids, { name: tr(`Rutina ${new Date().toLocaleDateString(lang)}`) });
+        if (tabNow()) await putInTab(r.id, tabNow());
         emit('data');
         flash(r.id);
         toast(`Rutina nueva «${r.name}» con ${ids.length} dibujo(s). Ábrela para ponerle nombre, reps y notas.`);
@@ -381,6 +952,41 @@ export function renderRoutines(root) {
   };
 
   $('#q').addEventListener('input', (e) => ((filters.q = e.target.value), drawGrids()));
+
+  // Vista de las dos cuadrículas (se recuerda aparte de la de Bibliotecas). Ctrl + rueda cambia de una a otra.
+  let view = 'm';
+  try {
+    const saved = localStorage.getItem('jr-view-rutinas');
+    if (VIEWS.some(([k]) => k === saved)) view = saved;
+  } catch {
+    /* sin almacenamiento */
+  }
+  const setView = (v) => {
+    view = v;
+    try {
+      localStorage.setItem('jr-view-rutinas', v);
+    } catch {
+      /* solo esta vez */
+    }
+    $('#rtGrid').className = `tiles view-${v}`;
+    $('#exGrid').className = `tiles view-${v}`;
+    root.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
+  };
+  setView(view);
+  drawTabs();
+  $('#views').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-view]');
+    if (b) setView(b.dataset.view);
+  });
+  let wheelAt = 0;
+  root.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey || !e.target.closest('.lib-main')) return;
+    e.preventDefault();
+    if (Date.now() - wheelAt < 180) return; // un paso por golpe de rueda
+    wheelAt = Date.now();
+    const i = VIEWS.findIndex(([k]) => k === view) + (e.deltaY > 0 ? 1 : -1);
+    if (i >= 0 && i < VIEWS.length) setView(VIEWS[i][0]);
+  }, { passive: false });
 
   const onKey = (e) => {
     if (e.key === 'Escape' && panel) ((panel = null), drawPanel());

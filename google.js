@@ -34,6 +34,7 @@ let FIREBASE_FILE;
 let TOKEN_FILE;
 let client = null; // { client_id, client_secret }
 let firebase = null; // { apiKey, projectId }
+let identity = null; // { token, until }: id_token reciente
 let tokens = null; // { access_token, refresh_token, expires_at, email, fb: { idToken, refreshToken, expiresAt, uid }, shareFolder }
 const pending = new Map(); // state -> { verifier, redirect, at }
 
@@ -256,6 +257,7 @@ export async function loadProfile() {
 }
 
 export async function logout() {
+  identity = null;
   if (tokens?.refresh_token) {
     fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(tokens.refresh_token)}`, { method: 'POST' }).catch(() => {});
   }
@@ -270,6 +272,15 @@ async function refreshGoogle() {
   tokens = { ...tokens, access_token: t.access_token, expires_at: Date.now() + (t.expires_in - 60) * 1000 };
   await saveTokens();
   return t;
+}
+
+/** Prueba de qué cuenta es, para el servidor Premium. A diferencia del access_token, no da acceso a Drive. */
+export async function identityToken() {
+  if (!tokens?.refresh_token) return null;
+  if (Date.now() < (identity?.until ?? 0)) return identity.token;
+  const t = await refreshGoogle();
+  identity = t.id_token ? { token: t.id_token, until: Date.now() + 50 * 60_000 } : null;
+  return identity?.token || null;
 }
 
 async function accessToken() {
@@ -311,6 +322,14 @@ async function drive(url, opts = {}, tries = 3) {
     }
     return res;
   }
+}
+
+/** Espacio de la cuenta de Google (Drive, Gmail y Fotos comparten cuota) y lo que ocupa la app, en bytes. */
+export async function storage() {
+  const q = (await (await drive('/drive/v3/about?fields=storageQuota')).json()).storageQuota || {};
+  let app = 0;
+  for (const f of (await listFiles()).values()) app += Number(f.size) || 0;
+  return { usage: Number(q.usage) || 0, limit: q.limit ? Number(q.limit) : null, app };
 }
 
 /** Archivos de la carpeta de la app: Map nombre -> { id, size, version, modifiedTime }. */

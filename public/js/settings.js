@@ -5,7 +5,10 @@
 // Se abre como una ventana emergente (como el menú de Configuración de Claude): un diálogo con
 // un menú lateral de secciones, encima de lo que estuvieras viendo.
 import { api } from './api.js';
-import { esc, toast, sleep, ask } from './store.js';
+import { openNet, NET_INFO } from './redes.js';
+import { CLOUDS, NET_ICON, SAVED_HINT, ICON_IG } from './library.js';
+import { esc, toast, sleep, ask, state, emit, modelPicker, styleTiles, chooseAi, ui, shelves, shelfName, libraryById, upsert, queueDownload, canDownload } from './store.js';
+import { LANGS, lang, setLang, tr } from './i18n.js';
 
 const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICON = {
@@ -13,8 +16,50 @@ const ICON = {
   account: svg('<circle cx="12" cy="8" r="3.3"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'),
   share: svg('<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/>'),
   folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  ai: svg('<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16v4M17 18h4"/>'),
+  language: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>'),
+  models: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 16-5-5L6 19"/>'),
+  social: svg('<circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="m8.3 10.8 7.4-3.6M8.3 13.2l7.4 3.6"/>'),
+  cloud: svg('<path d="M7 18h11.5a3.5 3.5 0 0 0 .5-7 5.5 5.5 0 0 0-10.4-1.6A4.5 4.5 0 0 0 7 18z"/>'),
+  sidebar: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
+  theme: svg('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-.6-.3-1-.6-1.4-.3-.4-.6-.8-.6-1.3 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.2-4-7.5-9-7.5z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>'),
+  backup: svg('<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 10h16M10 14h4"/>'),
   about: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
 };
+
+// Deben coincidir con las variantes de Lemon Squeezy; url: el enlace de compra de cada una.
+// La barra lateral: fija, oculta o que aparece al acercar el ratón al borde.
+const OPTS_MODES = [['fixed', 'Mantener fija'], ['auto', 'Ocultar automáticamente'], ['hidden', 'Ocultar por completo']];
+const optsMode = () => {
+  try {
+    return localStorage.getItem('jr-opts-mode') || 'fixed';
+  } catch {
+    return 'fixed';
+  }
+};
+const applyOptsMode = (mode) => {
+  document.documentElement.classList.toggle('opts-auto', mode === 'auto');
+  document.documentElement.classList.toggle('opts-hidden', mode === 'hidden');
+};
+applyOptsMode(optsMode());
+
+// Packs de pago único. Precios con IVA: dejan margen tras impuestos, comisión e imágenes.
+// url: el enlace de compra de cada pack en Lemon Squeezy.
+const CREDIT_PACKS = [{ credits: 100, price: 12, url: '' }, { credits: 200, price: 22, url: '' }, { credits: 500, price: 49, url: '' }, { credits: 1000, price: 89, url: '' }];
+
+const PLANS = [
+  { id: 'week', label: '1 semana', price: '9 € / semana', vignettes: 60, url: '' },
+  { id: 'month', label: '1 mes', price: '19 € / mes', vignettes: 150, url: '' },
+  { id: 'year', label: '1 año', price: '99 € / año', vignettes: 1200, url: '' },
+];
+
+// a, b y s: colores de la muestra (acento, fondo y superficie). Los mismos que en styles.css.
+const THEMES = [
+  { id: 'dark', label: 'Oscuro', hint: 'Cálido y oscuro', a: '#e0745a', b: '#1b1816', s: '#25211e' },
+  { id: 'light', label: 'Claro', hint: 'Papel claro', a: '#c4553a', b: '#f6f1ea', s: '#ffffff' },
+  { id: 'auto', label: 'Por defecto', hint: 'Sigue a Windows', split: true },
+  { id: 'midnight', label: 'Medianoche', hint: 'Azul noche', a: '#6ea8ff', b: '#0b1220', s: '#131c2e' },
+];
 
 // Marco común (título + cerrar) para cualquier estado: cargando, error o ya con datos.
 const shell = (inner) => `
@@ -27,13 +72,13 @@ const shell = (inner) => `
   </div>`;
 
 /** Abre Ajustes como ventana emergente encima de lo que se esté viendo. Devuelve el diálogo. */
-export function openSettings() {
+export function openSettings(section = null) {
   document.getElementById('settingsDialog')?.remove();
   const dlg = document.createElement('dialog');
   dlg.id = 'settingsDialog';
   dlg.className = 'settings-dialog';
   document.body.appendChild(dlg);
-  const teardown = mountSettings(dlg);
+  const teardown = mountSettings(dlg, section);
   dlg.addEventListener('close', () => {
     teardown();
     dlg.remove();
@@ -44,7 +89,7 @@ export function openSettings() {
   return dlg;
 }
 
-function mountSettings(root) {
+function mountSettings(root, section) {
   root.innerHTML = shell('<p class="hint">Cargando…</p>');
   let info = null;
   let g = null; // estado de la cuenta de Google
@@ -52,7 +97,7 @@ function mountSettings(root) {
   let c = null; // estado de lo compartido (con las reglas de Firestore)
   let changingClient = false;
   let changingFb = false;
-  let activeSection = null; // sección elegida en el menú lateral
+  let activeSection = section; // sección elegida en el menú lateral
   const desk = () => Boolean(upd?.desktop);
 
   // ---------- versión de la app (solo en la app instalada) ----------
@@ -83,7 +128,7 @@ function mountSettings(root) {
 
   // ---------- cuenta de Google ----------
 
-  const timeOf = (iso) => (iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '');
+  const timeOf = (iso) => (iso ? new Date(iso).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'short' }) : '');
 
   const drawGoogle = () => {
     const box = root.querySelector('#googleCard');
@@ -122,6 +167,7 @@ function mountSettings(root) {
           <dt>Cuenta</dt><dd><b>${esc(g.email || 'Google')}</b></dd>
           <dt>Estado</dt><dd>${g.state === 'syncing' ? '<span class="spin"></span> ' : ''}${line}</dd>
         </dl>
+        <div class="drive-space" id="driveSpace">${spaceHtml()}</div>
         <div class="row wrap">
           <button class="btn" data-g="sync" ${g.state === 'syncing' ? 'disabled' : ''}>Sincronizar ahora</button>
           <button class="btn ghost danger" data-g="logout">Cerrar sesión</button>
@@ -131,7 +177,31 @@ function mountSettings(root) {
     box.innerHTML = `
       <h3>Tu cuenta</h3>
       ${err}${body}`;
+    if (g.connected && Date.now() - spaceAt > 60_000) loadSpace();
   };
+
+  // Espacio de Google Drive: se pide como mucho una vez por minuto.
+  let space = null;
+  let spaceAt = 0;
+  const gb = (n) => tr(`${(n / 1024 ** 3).toLocaleString(lang, { maximumFractionDigits: 1 })} GB`);
+  const mb = (n) => tr(`${Math.max(0.1, n / 1024 ** 2).toLocaleString(lang, { maximumFractionDigits: 1 })} MB`);
+  function spaceHtml() {
+    if (!space) return '';
+    const pct = space.limit ? Math.min(100, (space.usage / space.limit) * 100) : 0;
+    return `<div class="space-head"><b>Espacio en Google Drive</b><span>${space.limit ? `${gb(space.usage)} / ${gb(space.limit)}` : gb(space.usage)}</span></div>
+      ${space.limit ? `<div class="bar"><div style="width:${pct.toFixed(1)}%" class="${pct > 90 ? 'full' : ''}"></div></div>
+      <p class="hint">Libres: ${gb(Math.max(0, space.limit - space.usage))}. Diva Routine ocupa ${mb(space.app)}. El espacio se comparte con Gmail y Google Fotos.</p>` : `<p class="hint">Espacio ilimitado. Diva Routine ocupa ${mb(space.app)}.</p>`}`;
+  }
+  async function loadSpace() {
+    spaceAt = Date.now();
+    try {
+      space = await api.googleStorage();
+    } catch {
+      return; // sin conexión o sin permiso: no se muestra
+    }
+    const el = root.querySelector('#driveSpace');
+    if (el) el.innerHTML = spaceHtml();
+  }
 
   // ---------- compartir con otras personas (Firebase) ----------
 
@@ -238,6 +308,117 @@ function mountSettings(root) {
       </div>
     </section>`;
 
+  // ---------- Premium: las cuotas (aún sin cobro real) ----------
+
+  const drawPremium = () => {
+    const box = root.querySelector('#premiumCard');
+    if (!box) return;
+    const a = state.ai;
+    const plan = PLANS.find((p) => p.id === a?.plan);
+    const premium = Boolean(a?.premium);
+    const special = premium && a.kind !== 'paid'; // cortesía o activado en el panel: no es una suscripción
+    const usage = premium ? `
+      <p>Has usado ${a.used} de ${a.limit} créditos en este periodo.</p>
+      <div class="plan-meter"><i style="width:${Math.min(100, (a.used / (a.limit || 1)) * 100)}%"></i></div>` : '';
+    const until = (ms) => new Date(ms).toLocaleDateString(lang, { dateStyle: 'long' });
+    const daysLeft = a?.expires ? Math.max(0, Math.ceil((a.expires - Date.now()) / 864e5)) : null;
+    const current = !premium ? '' : special ? `
+      <aside class="plan-special">
+        <span class="plan-special-tag">Licencia especial</span>
+        <dl class="set-list">
+          <dt>Tipo</dt><dd>${a.kind === 'comp' ? 'Licencia de cortesía' : 'Premium activado en tu cuenta'}</dd>
+          <dt>Cuota</dt><dd>${a.days ? `${a.limit} créditos en ${a.days} días` : esc(plan?.label || '')}</dd>
+          ${a.expires ? `<dt>Válido hasta</dt><dd>${esc(until(a.expires))}</dd>
+          <dt>Tiempo restante</dt><dd>${daysLeft === 1 ? '1 día' : `${daysLeft} días`}</dd>` : ''}
+          <dt>Créditos</dt><dd>Quedan ${Math.max(0, a.limit - a.used)} de ${a.limit}</dd>
+        </dl>
+        ${usage}
+      </aside>` : `
+      <section class="plan-now">
+        <h4>Tu plan actual</h4>
+        <p class="plan-now-name">${esc(plan?.label || '')}<span>${esc(plan?.price || '')}</span></p>
+        ${usage}
+        ${a.expires ? `<p class="hint">Válido hasta el ${esc(until(a.expires))}</p>` : ''}
+      </section>`;
+    const planCard = (p) => {
+      const mine = premium && !special && p.id === a.plan;
+      const label = premium && !special ? 'Cambiar a este plan' : 'Elegir';
+      return `
+          <article class="plan${mine ? ' current' : ''}">
+            <h4>${esc(p.label)}</h4>
+            <p class="plan-price">${esc(p.price)}</p>
+            <p class="hint">${p.vignettes.toLocaleString(lang)} créditos</p>
+            ${mine ? '<button class="btn" disabled>Tu plan</button>'
+              : p.url && a?.available ? `<a class="btn primary" href="${esc(p.url)}" target="_blank" rel="noopener">${label}</a>`
+              : '<button class="btn primary" disabled>Disponible pronto</button>'}
+          </article>`;
+    };
+    box.innerHTML = `
+      <h3>Diva Routine Premium</h3>
+      <p>Genera las viñetas de tus rutinas con IA en la nube: eliges el estilo al crear las viñetas y la app hace el resto.</p>
+      ${!premium && a?.licensed ? '<p class="hint warn">Tu suscripción ya no está activa. Renuévala para seguir usando la IA.</p>' : ''}
+      ${current}
+      ${premium ? `<h4 class="plans-title">${special ? 'Otras cuotas Premium' : 'Cambiar de plan'}</h4>` : ''}
+      <div class="plans">${PLANS.map(planCard).join('')}</div>
+      <h4 class="plans-title">Créditos sueltos</h4>
+      ${a?.extra ? `<p class="hint">Tienes ${a.extra} créditos sueltos. No caducan y se gastan al acabarse la cuota.</p>` : ''}
+      <div class="row credit-pack"><select id="creditPack" aria-label="Créditos sueltos">${CREDIT_PACKS.map((c) => `<option value="${c.credits}">${tr(`${c.credits.toLocaleString(lang)} créditos`)} · ${c.price} €</option>`).join('')}</select><button class="btn primary" data-premium="buy-pack" ${CREDIT_PACKS.some((c) => c.url) ? '' : 'disabled'}>${CREDIT_PACKS.some((c) => c.url) ? 'Comprar' : 'Disponible pronto'}</button></div>
+      <div class="row credit-pack"><input id="packKey" autocomplete="off" spellcheck="false" placeholder="Pega aquí la clave de tu pack" aria-label="Clave del pack"><button class="btn" data-premium="redeem" ${premium ? '' : 'disabled'}>Canjear</button></div>
+      ${!premium || special ? `
+        <div class="row"><input id="licKey" autocomplete="off" spellcheck="false" placeholder="Pega aquí tu clave de licencia" aria-label="Clave de licencia"><button class="btn" data-premium="activate" ${a?.available ? '' : 'disabled'}>Activar</button></div>
+        <p class="hint">Tras la compra recibirás la clave de licencia por correo.</p>` : ''}
+      ${premium && a.licensed ? '<div class="row"><button class="btn" data-premium="deactivate">Desactivar en este ordenador</button></div>' : ''}`;
+  };
+
+  // ---------- temas ----------
+
+  const drawTheme = () => {
+    const box = root.querySelector('#themeCard');
+    if (!box) return;
+    const on = window.appTheme.get();
+    box.innerHTML = `
+      <h3>Temas</h3>
+      <p>Elige cómo se ve la app. Se guarda en este ordenador.</p>
+      <div class="themes">${THEMES.map((t) => `
+        <button class="theme-tile${t.id === on ? ' on' : ''}" data-pick-theme="${t.id}" aria-pressed="${t.id === on}">
+          <span class="theme-art${t.split ? ' split' : ''}" ${t.split ? '' : `style="--a:${t.a};--b:${t.b};--s:${t.s}"`}></span>
+          <b>${esc(t.label)}</b><small>${esc(t.hint)}</small>
+        </button>`).join('')}</div>`;
+  };
+
+  // ---------- idiomas ----------
+
+  const drawLanguage = () => {
+    const box = root.querySelector('#languageCard');
+    if (!box) return;
+    box.innerHTML = `
+      <h3>Idiomas</h3>
+      <p>Elige el idioma de la app.</p>
+      <div class="themes">${LANGS.map(([code, name]) => `
+        <button class="theme-tile lang-tile${code === lang ? ' on' : ''}" data-pick-lang="${code}" aria-pressed="${code === lang}" lang="${code}"><b>${esc(name)}</b></button>`).join('')}</div>`;
+  };
+
+  // ---------- backups: toda tu información en un archivo ----------
+
+  const size = (n) => (n >= 1e9 ? `${(n / 1e9).toLocaleString(lang, { maximumFractionDigits: 1 })} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`);
+
+  const drawBackup = async () => {
+    const box = root.querySelector('#backupCard');
+    if (!box) return;
+    const b = await api.backupInfo().catch(() => null);
+    box.innerHTML = `
+      <h3>Backups</h3>
+      <p>Guarda toda tu información en un archivo de tu ordenador y recupérala cuando la necesites: bibliotecas, videos, rutinas y dibujos.</p>
+      ${b ? `<p class="hint">Ahora mismo: ${b.videos.toLocaleString(lang)} videos y ${b.routines.toLocaleString(lang)} rutinas. El backup ocupará unos ${size(b.bytes)}.</p>` : ''}
+      <div class="row wrap">
+        <a class="btn primary" href="/api/backup" download>Exportar backup</a>
+        <label class="btn" id="backupPick">Importar backup<input type="file" id="backupFile" accept=".tar" hidden></label>
+      </div>
+      <p class="hint" id="backupBusy" hidden><span class="spin"></span> Restaurando el backup. No cierres la app…</p>
+      <p class="hint">Guarda el archivo fuera de este ordenador, por ejemplo en un disco externo. Importar sustituye lo que hay ahora; antes se aparta en la carpeta «antes-de-restaurar», por si necesitas volver atrás.</p>
+      <p class="hint">Por seguridad, las sesiones de tus cuentas y la licencia Premium no se guardan en el backup: después de restaurar tendrás que volver a conectarlas.</p>`;
+  };
+
   // ---------- menú lateral (como el de Configuración) ----------
 
   // «App» solo si es la app instalada (ahí es donde hay actualizaciones que buscar).
@@ -245,6 +426,52 @@ function mountSettings(root) {
     desk() && { id: 'app', label: 'App', icon: ICON.app, html: '<section class="set-card" id="appCard"></section>' },
     { id: 'account', label: 'Tu cuenta', icon: ICON.account, html: '<section class="set-card" id="googleCard"></section>' },
     { id: 'share', label: 'Compartir', icon: ICON.share, html: '<section class="set-card" id="collabCard"></section>' },
+    { id: 'premium', label: 'Premium', icon: ICON.ai, html: '<section class="set-card" id="premiumCard"></section>' },
+    { id: 'language', label: 'Idiomas', icon: ICON.language, html: '<section class="set-card" id="languageCard"></section>' },
+    { id: 'models', label: 'Modelos IA', icon: ICON.models, html: `<section class="set-card">
+      <h3>Modelos IA</h3>
+      <p class="hint">Lo que usa la app por defecto al crear viñetas. Puedes cambiarlo también en cada dibujo.</p>
+      <div class="set-models">
+        <div class="field"><span>Dibujos</span>${modelPicker()}</div>
+        <div class="field"><span>Cuadro de prompt</span>${modelPicker('promptModel')}</div>
+      </div>
+      ${styleTiles()}
+    </section>` },
+    { id: 'social', label: 'Redes sociales', icon: ICON.social, html: `<section class="set-card">
+      <h3>Redes sociales</h3>
+      <p class="hint">Instagram, YouTube, TikTok, Facebook y X: conecta tus cuentas e importa tus colecciones.</p>
+      ${['instagram', 'youtube', 'tiktok', 'facebook', 'x'].map((net) => {
+        const ig = net === 'instagram';
+        const on = ig ? state.instagram?.connected : state.social?.[net]?.connected;
+        const who = ig && state.instagram?.username ? ` como <b>@${esc(state.instagram.username)}</b>` : '';
+        return `<section class="net-card" style="--net:${ig ? '#e1306c' : NET_INFO[net].color}">
+          <h4>${ig ? ICON_IG : NET_ICON[net]}${ig ? 'Instagram' : esc(NET_INFO[net].name)}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>
+          <p class="hint">${on ? `Conectado${who}.` : SAVED_HINT[net]}</p>
+          <button class="btn small ${on ? 'ghost' : 'primary'}" ${ig ? 'data-open-panel="instagram"' : `data-open-net="${net}"`}>${on ? 'Abrir' : 'Conectar cuenta'}</button>
+        </section>`;
+      }).join('')}
+    </section>` },
+    { id: 'cloud', label: 'Nube', icon: ICON.cloud, html: `<section class="set-card">
+      <h3>Nube</h3>
+      <p class="hint">Google Drive, Dropbox, OneDrive y MEGA: importa tus videos e imágenes desde tus servicios.</p>
+      ${['gdrive', 'dropbox', 'onedrive', 'mega'].map((key) => {
+        const on = key === 'gdrive' && state.google?.connected && state.google?.driveRead;
+        return `<section class="net-card" style="--net:${CLOUDS[key].color}">
+          <h4>${CLOUDS[key].icon}${CLOUDS[key].name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>
+          ${key === 'gdrive'
+            ? '<div id="gdriveBox"></div>'
+            : `<p class="hint">Conectar la cuenta para sincronizar tus datos y usar su espacio llegará pronto.</p><button class="btn small" disabled>Conectar cuenta</button>`}
+        </section>`;
+      }).join('')}
+    </section>` },
+    { id: 'sidebar', label: 'Barra lateral', icon: ICON.sidebar, html: `<section class="set-card">
+      <h3>Barra lateral</h3>
+      <p class="hint">La barra de la derecha de Bibliotecas y Creador de rutinas.</p>
+      <div class="set-radios">${OPTS_MODES.map(([k, label]) => `<label><input type="radio" name="optsMode" value="${k}" ${k === optsMode() ? 'checked' : ''}> ${label}</label>`).join('')}</div>
+      <p class="hint">Si la ocultas por completo, sus botones (Subir, Mover, Borrar…) no estarán disponibles hasta que la vuelvas a mostrar.</p>
+    </section>` },
+    { id: 'theme', label: 'Temas', icon: ICON.theme, html: '<section class="set-card" id="themeCard"></section>' },
+    { id: 'backup', label: 'Backups', icon: ICON.backup, html: '<section class="set-card" id="backupCard"></section>' },
     { id: 'folder', label: 'Carpeta compartida', icon: ICON.folder, html: folderPane() },
     { id: 'about', label: 'Acerca de', icon: ICON.about, html: aboutPane() },
   ].filter(Boolean);
@@ -263,13 +490,100 @@ function mountSettings(root) {
       </div>`);
   };
 
+  // Google Drive dentro de Ajustes: conectar el permiso, ver tus carpetas e importarlas.
+  let driveFolders = null; // null: sin pedir; [] o lista: ya pedidas
+  const driveChecked = new Set();
+  function drawDrive() {
+    const box = root.querySelector('#gdriveBox');
+    if (!box) return;
+    const gs = state.google || g || {};
+    if (!gs.connected) {
+      box.innerHTML = '<p class="hint">Inicia sesión con tu cuenta de Google en <b>Tu cuenta</b> para conectar Drive.</p>';
+      return;
+    }
+    if (!gs.driveRead) {
+      box.innerHTML = `<p class="hint">Sin conectar</p><button class="btn small primary" data-drive="connect">Conectar cuenta</button>`;
+      return;
+    }
+    const list = driveFolders === null
+      ? '<button class="btn small" data-drive="list">Ver tus carpetas</button>'
+      : !driveFolders.length ? '<p class="hint">No hay carpetas en tu Drive.</p>'
+        : `<div class="drive-folders">${driveFolders.map((f) => `<label><input type="checkbox" data-drive-pick="${esc(f.id)}" ${driveChecked.has(f.id) ? 'checked' : ''}> ${esc(f.name)}</label>`).join('')}</div>
+          <div class="row wrap"><label class="inline">En <select id="driveTo">${shelves().map((l) => `<option value="${l.id}">${esc(shelfName(l))}</option>`).join('')}</select></label>
+          <button class="btn small primary" data-drive="import" ${driveChecked.size ? '' : 'disabled'}>Importar ${driveChecked.size || ''}</button></div>
+          <p class="hint" id="driveBusy"></p>`;
+    box.innerHTML = `<p class="hint">Conectado.</p>${list}`;
+  }
+
+  root.addEventListener('change', (e) => {
+    const id = e.target.dataset?.drivePick;
+    if (!id) return;
+    if (e.target.checked) driveChecked.add(id);
+    else driveChecked.delete(id);
+    drawDrive();
+  });
+  root.addEventListener('click', async (e) => {
+    const act = e.target.closest('[data-drive]')?.dataset.drive;
+    if (!act) return;
+    const btn = e.target.closest('button');
+    try {
+      if (act === 'connect') {
+        window.open('/api/google/login?drive=1', '_blank');
+        btn.disabled = true;
+        btn.textContent = tr('Esperando el permiso en el navegador…');
+        for (let i = 0; i < 150; i++) {
+          await sleep(2000);
+          const now = await api.google().catch(() => null);
+          if (now?.driveRead) {
+            g = now;
+            state.google = { ...state.google, ...now };
+            toast('Google Drive conectado');
+            return drawDrive();
+          }
+        }
+        drawDrive();
+      } else if (act === 'list') {
+        btn.disabled = true;
+        driveFolders = (await api.driveFolders()).folders.map((f) => ({ id: f.id, name: f.name }));
+        drawDrive();
+      } else if (act === 'import') {
+        btn.disabled = true;
+        const shelf = libraryById(root.querySelector('#driveTo').value);
+        const parentId = shelf?.root ? null : shelf?.id || null;
+        const created = [];
+        for (const f of driveFolders.filter((x) => driveChecked.has(x.id))) {
+          root.querySelector('#driveBusy').textContent = tr(`Importando «${f.name}»…`);
+          const r = await api.driveImport({ id: f.id, name: f.name }, parentId);
+          upsert('libraries', r.library);
+          r.created.forEach((v) => upsert('videos', v));
+          created.push(...r.created);
+          driveChecked.delete(f.id);
+        }
+        emit('data');
+        queueDownload(created.filter(canDownload).map((v) => v.id));
+        toast(tr(`${created.length} elemento${created.length === 1 ? '' : 's'} importado${created.length === 1 ? '' : 's'}`));
+        drawDrive();
+      }
+    } catch (err) {
+      toast(err.message, 'error');
+      drawDrive();
+    }
+  });
+
   const load = async () => {
     try {
       [info, g, c, upd] = await Promise.all([api.settings(), api.google(), api.collab(), api.update()]);
+      state.ai = await api.ai().catch(() => state.ai);
+      emit('ai');
       draw();
       drawApp();
       drawGoogle();
       drawCollab();
+      drawPremium();
+      drawLanguage();
+      drawTheme();
+      drawBackup();
+      drawDrive();
     } catch (e) {
       root.innerHTML = shell(`<div class="empty-state"><h2>No se pudieron leer los ajustes</h2><p>${esc(e.message)}</p></div>`);
     }
@@ -279,11 +593,99 @@ function mountSettings(root) {
   // Cerrar (la X) y cambiar de sección en el menú lateral.
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-close-settings]')) return root.close();
+    const tile = e.target.closest('.style-tile');
+    if (tile) {
+      chooseAi(tile).then(() => root.querySelectorAll('.style-tile').forEach((b) => {
+        b.classList.toggle('on', b === tile);
+        b.setAttribute('aria-pressed', b === tile);
+      }));
+      return;
+    }
+    const net = e.target.closest('[data-open-net]')?.dataset.openNet;
+    if (net) return openNet(net);
+    const open = e.target.closest('[data-open-panel]')?.dataset.openPanel;
+    if (open) {
+      // Los paneles viven en Bibliotecas: se abre allí, también si ya estabas en ella.
+      ui.openPanel = open;
+      root.close();
+      if (location.hash.startsWith('#/biblioteca')) window.dispatchEvent(new HashChangeEvent('hashchange'));
+      else location.hash = '#/biblioteca';
+      return;
+    }
     const nav = e.target.closest('[data-section]');
     if (!nav) return;
     activeSection = nav.dataset.section;
     root.querySelectorAll('.set-nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.section === activeSection));
     root.querySelectorAll('.set-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === activeSection));
+  });
+
+  root.addEventListener('click', async (e) => {
+    const act = e.target.closest('[data-premium]')?.dataset.premium;
+    if (!act) return;
+    try {
+      if (act === 'buy-pack') {
+        const pack = CREDIT_PACKS.find((c) => c.credits === +root.querySelector('#creditPack').value);
+        if (pack?.url) window.open(pack.url, '_blank', 'noopener');
+        return;
+      }
+      if (act === 'redeem') {
+        state.ai = await api.aiCredits(root.querySelector('#packKey').value);
+        emit('ai');
+        toast('Créditos añadidos');
+        return drawPremium();
+      }
+      if (act === 'activate') {
+        state.ai = await api.aiActivate(root.querySelector('#licKey').value);
+        emit('ai');
+        toast('Premium activado');
+      } else {
+        if (!await ask('¿Desactivar Premium en este ordenador? Tu suscripción sigue activa y podrás volver a activarla con tu clave.')) return;
+        state.ai = await api.aiDeactivate();
+        emit('ai');
+      }
+      drawPremium();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+
+  root.addEventListener('click', (e) => {
+    const code = e.target.closest('[data-pick-lang]')?.dataset.pickLang;
+    if (code && code !== lang) setLang(code);
+  });
+
+  root.addEventListener('click', (e) => {
+    const id = e.target.closest('[data-pick-theme]')?.dataset.pickTheme;
+    if (!id) return;
+    window.appTheme.set(id);
+    drawTheme();
+  });
+
+  root.addEventListener('change', (e) => {
+    if (e.target.matches('select[data-ai-choice]')) chooseAi(e.target);
+    if (e.target.name === 'optsMode') {
+      applyOptsMode(e.target.value);
+      try {
+        localStorage.setItem('jr-opts-mode', e.target.value);
+      } catch {
+        /* solo esta vez */
+      }
+    }
+  });
+  root.addEventListener('change', async (e) => {
+    if (e.target.id !== 'backupFile' || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!await ask(`¿Restaurar «${file.name}»? Sustituirá todo lo que hay ahora en la app. Lo actual se aparta en la carpeta «antes-de-restaurar».`)) return;
+    root.querySelector('#backupPick').hidden = true;
+    root.querySelector('#backupBusy').hidden = false;
+    try {
+      await api.restoreBackup(file);
+      location.reload();
+    } catch (err) {
+      toast(err.message, 'error');
+      drawBackup();
+    }
   });
 
   root.addEventListener('change', async (e) => {

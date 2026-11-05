@@ -1,0 +1,27 @@
+# Panel de administración, en un Worker aparte. Se despliega con:
+#   npx wrangler deploy --config wrangler.admin.toml
+# Los correos con permiso son un secreto (el repositorio es público):
+#   npx wrangler secret put ADMIN_EMAILS --config wrangler.admin.toml
+name = "diva-routine-admin"
+main = "admin-worker.js"
+compatibility_date = "2026-10-01"
+
+# Las URL de versión saltarían la protección de Access: el panel solo existe en su dirección.
+preview_urls = false
+
+# La misma base de datos que el servidor público.
+[[d1_databases]]
+binding = "DB"
+database_name = "diva-routine-admin"
+database_id = "29c69b2c-0140-4ae3-ad4a-34c644fcab34"
+
+# El mismo KV: aquí están las imágenes de los estilos.
+[[kv_namespaces]]
+binding = "USAGE"
+id = "c25143d6baa841638060b23342211642"
+
+# Cloudflare Access: el equipo (lo que va antes de .cloudflareaccess.com) y el AUD de la aplicación.
+# Si falta algo, el panel no abre.
+[vars]
+ACCESS_TEAM = "proud-hall-7c5a"
+ACCESS_AUD = "30bbaff81c82db8eb0d7dbe036c897b25ac3c8eaa4a7bf4a6099187ebd7bdea9"
