@@ -17,7 +17,10 @@ Everything stays on your computer. Optionally, sign in with Google to keep your 
 - **Import from social networks**: links and playlists from YouTube, TikTok and Facebook, and private saved collections from Instagram. Each network has a step-by-step connection tutorial; linked lists and collections re-sync automatically.
 - **Zoomable timeline** with an overview bar and a clear frame preview of the selected stretch.
 - **AI pose extraction** (MediaPipe): splits videos into exercises, detects technique (kicks, extensions, passé, plié, turns, jumps, floor work, relevé, arms…) and draws each key phase.
-- **Routines** with manual or automatic ordering, reps, notes and printable A4 sheets.
+- **Routine builder** with all your exercise sequences: drag them onto a routine (the page scrolls by itself near the edges), create empty routines in one click and rename them right on their tile.
+- **Routines** with manual or automatic ordering, reps, notes and printable A4 sheets. The **AI** button on each row improves the ticked panels, or the whole sequence when none are ticked (Premium).
+- **Video player** with 13 playback speeds, from ×0.1 to ×4.
+- **MEGA**: sign in (the password is never stored), browse your folders, import videos and photos, and optionally keep your data there.
 - **Google sign-in & sync**: your data mirrored to a private folder in your Google Drive (free up to 15 GB).
 - **Collaboration** (Firebase): shared folders where collaborators can add videos, routines with several editors, and shared drawings.
 - **Windows installer with automatic updates**: new versions are downloaded in the background and installed with one click.
@@ -39,7 +42,7 @@ The installed app checks for a newer release on start-up and every 3 hours, down
 1. Open the app and **sign in with Google** (or choose to use it without an account).
 2. In **Library**, use **Import** (paste links), **Upload** (local files) or **Social** (connect Instagram, YouTube, TikTok or Facebook and import lists).
 3. Open a video, mark stretches on the timeline and press **Extract drawings**.
-4. In **Routines**, select drawings, press **Routine**, choose the order and create it. Print or save it as PDF.
+4. In the **Routine builder**, tick exercise sequences, press **Routine**, set the name and, under **Options**, the order, tab and table style, then create it. Print or save it as PDF.
 5. To share, open a folder or routine and press **Share**, then enter the other person's Gmail.
 
 ### Running from source
