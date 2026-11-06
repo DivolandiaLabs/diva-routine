@@ -4,7 +4,7 @@
 //   copian ahí la primera vez (así, quien la instala ya puede iniciar sesión y compartir).
 // - Se actualiza sola: mira si hay una versión publicada más nueva, la baja en segundo plano y
 //   avisa (notificación de Windows y aviso en la app) para instalarla con un clic.
-import { app, BrowserWindow, Notification, shell, dialog } from 'electron';
+import { app, BrowserWindow, Notification, shell, dialog, safeStorage } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -121,6 +121,10 @@ function start() {
     check,
     install,
     focus: show,
+    // Cifrado del sistema (Windows: DPAPI) para sesiones guardadas (MEGA). Sin él, no se guardan.
+    protect: safeStorage.isEncryptionAvailable()
+      ? { encrypt: (t) => safeStorage.encryptString(t).toString('base64'), decrypt: (t) => safeStorage.decryptString(Buffer.from(t, 'base64')) }
+      : null,
     restart: () => {
       app.relaunch();
       app.exit(0);

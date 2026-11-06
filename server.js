@@ -22,6 +22,7 @@ import * as ig from './instagram.js';
 import * as social from './social.js';
 import * as cloud from './cloud.js';
 import * as google from './google.js';
+import * as mega from './mega.js';
 import * as ai from './ai.js';
 import * as backup from './backup.js';
 import { createCollab, RULES } from './collab.js';
@@ -96,6 +97,8 @@ google.initGoogle({
   firebaseFile: process.env.JR_FIREBASE ? path.resolve(process.env.JR_FIREBASE) : path.join(ROOT, 'firebase-config.json'),
   localDir: LOCAL_DIR,
 });
+// MEGA: la sesión (nunca la contraseña), cifrada por el sistema con la app de escritorio.
+mega.initMega({ localDir: LOCAL_DIR, crypt: DESKTOP?.protect || null });
 google.loadProfile().catch(() => {}); // foto de la cuenta, si aún no la tiene
 
 const newId = () => crypto.randomBytes(6).toString('hex');
@@ -308,19 +311,11 @@ async function othersOpen() {
 // donde inicias sesión baja los cambios de los demás y los junta con los suyos elemento a
 // elemento (gana el cambio más reciente; lo borrado queda borrado), y sube lo que tenga nuevo.
 
-const gsync = { state: 'off', last: null, error: null, progress: null };
-let gRemoteVersion = null; // versión del db.json de Drive que ya está juntada aquí
-let gPushed = null; // los datos que se subieron la última vez
-let gActive = null; // la vuelta de sincronización en curso
-let gQueued = null; // la siguiente, si se pidió otra mientras tanto
-let gTimer = null;
 
 /** Tras cada cambio de aquí, se sincroniza a los pocos segundos (juntando varios cambios seguidos). */
 function onLocalChange() {
   collab.schedule(); // y lo compartido con otras personas
-  if (!google.connected()) return;
-  clearTimeout(gTimer);
-  gTimer = setTimeout(() => syncGoogle().catch(() => {}), 4000);
+  for (const s of SYNCERS) s.soon();
 }
 
 /** Junta los datos de dos ordenadores. */
@@ -373,100 +368,130 @@ function referencedFiles(data) {
 }
 
 /**
- * Sincroniza con Google. Si ya hay una vuelta en curso, se hace otra justo después (una sola,
- * aunque se pida varias veces); la promesa termina cuando acaba la que incluye esta petición.
+ * Sincroniza los datos con un servicio (Google Drive, MEGA…). P: { connected, listFiles,
+ * downloadText, downloadFile, uploadFile, deleteFile }. Si ya hay una vuelta en curso, se hace
+ * otra justo después (una sola, aunque se pida varias veces).
  */
-function syncGoogle() {
-  if (!google.connected() || dataError) return Promise.resolve();
-  if (!gActive) {
-    gActive = runGoogleSync().finally(() => (gActive = null));
-    return gActive;
+function makeSyncer(tag, P) {
+  const st = { state: 'off', last: null, error: null, progress: null };
+  let remoteVersion = null; // versión del db.json remoto que ya está juntada aquí
+  let pushed = null; // los datos que se subieron la última vez
+  let active = null; // la vuelta en curso
+  let queued = null; // la siguiente, si se pidió otra mientras tanto
+  let timer = null;
+  function sync() {
+    if (!P.connected() || dataError) return Promise.resolve();
+    if (!active) {
+      active = run().finally(() => (active = null));
+      return active;
+    }
+    queued ||= active.then(() => {
+      queued = null;
+      return sync();
+    });
+    return queued;
   }
-  gQueued ||= gActive.then(() => {
-    gQueued = null;
-    return syncGoogle();
-  });
-  return gQueued;
-}
+  /** Tras cada cambio de aquí, a los pocos segundos (juntando varios cambios seguidos). */
+  function soon() {
+    if (!P.connected()) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => sync().catch(() => {}), 4000);
+  }
+  function reset() {
+    Object.assign(st, { state: 'off', error: null, progress: null });
+    remoteVersion = null;
+    pushed = null;
+  }
+  const info = () => ({ ...st, state: P.connected() ? st.state : 'off' });
+  async function run() {
+    st.state = 'syncing';
+    st.error = null;
+    try {
+      const files = await P.listFiles();
+      const remoteDb = files.get('db.json');
 
-async function runGoogleSync() {
-  gsync.state = 'syncing';
-  gsync.error = null;
-  try {
-    const files = await google.listFiles();
-    const remoteDb = files.get('db.json');
-
-    // 1) Traer y juntar lo que cambió en otros ordenadores.
-    if (remoteDb && remoteDb.version !== gRemoteVersion) {
-      const remote = JSON.parse(await google.downloadText(remoteDb.id));
-      await saveChain.catch(() => {});
-      const before = JSON.stringify(db);
-      const merged = mergeDb(db, remote);
-      gRemoteVersion = remoteDb.version;
-      if (JSON.stringify(merged) !== before) {
-        db = merged;
-        rememberSaved(db);
-        await saveDb();
-        dataVersion = Date.now();
-        console.log('[google] cambios de otros ordenadores juntados');
+      // 1) Traer y juntar lo que cambió en otros ordenadores.
+      if (remoteDb && remoteDb.version !== remoteVersion) {
+        const remote = JSON.parse(await P.downloadText(remoteDb.id));
+        await saveChain.catch(() => {});
+        const before = JSON.stringify(db);
+        const merged = mergeDb(db, remote);
+        remoteVersion = remoteDb.version;
+        if (JSON.stringify(merged) !== before) {
+          db = merged;
+          rememberSaved(db);
+          await saveDb();
+          dataVersion = Date.now();
+          console.log(`[${tag}] cambios de otros ordenadores juntados`);
+        }
       }
-    }
 
-    // 2) Archivos: subir a Drive los que faltan allí y bajar los que faltan aquí. Los videos de
-    // carpetas compartidas ya están en un Drive con su enlace: no se guardan otra vez aquí.
-    const refs = referencedFiles(db);
-    const linked = new Set(db.videos.filter((v) => v.source?.drive).map((v) => v.source.file));
-    const here = (f) => fs.existsSync(path.join(UPLOAD_DIR, f));
-    const toUp = [...refs].filter((f) => !linked.has(f) && !files.has(f) && here(f));
-    const toDown = [...refs].filter((f) => files.has(f) && !here(f));
-    const total = toUp.length + toDown.length;
-    let done = 0;
-    for (const f of toUp) {
-      gsync.progress = { done, total, what: 'Subiendo' };
-      const r = await google.uploadFile(f, await fsp.readFile(path.join(UPLOAD_DIR, f)));
-      files.set(f, { id: r.id, modifiedTime: now() });
-      done++;
-    }
-    for (const f of toDown) {
-      gsync.progress = { done, total, what: 'Bajando' };
-      await google.downloadFile(files.get(f).id, path.join(UPLOAD_DIR, f));
-      done++;
-    }
-    if (toDown.length) dataVersion = Date.now(); // ya se pueden ver los videos y fotos nuevos
+      // 2) Archivos: subir a Drive los que faltan allí y bajar los que faltan aquí. Los videos de
+      // carpetas compartidas ya están en un Drive con su enlace: no se guardan otra vez aquí.
+      const refs = referencedFiles(db);
+      // Tampoco lo importado desde tu cuenta de MEGA o de tu Google Drive: ya está en esa nube, y
+    // cada ordenador lo baja de allí (así no ocupa espacio dos veces).
+    const linked = new Set(db.videos.filter(remoteCopy).map((v) => v.source.file));
+      const here = (f) => fs.existsSync(path.join(UPLOAD_DIR, f));
+      const toUp = [...refs].filter((f) => !linked.has(f) && !files.has(f) && here(f));
+      const toDown = [...refs].filter((f) => files.has(f) && !here(f));
+      const total = toUp.length + toDown.length;
+      let done = 0;
+      for (const f of toUp) {
+        st.progress = { done, total, what: 'Subiendo' };
+        const r = await P.uploadFile(f, await fsp.readFile(path.join(UPLOAD_DIR, f)));
+        files.set(f, { id: r.id, modifiedTime: now() });
+        done++;
+      }
+      for (const f of toDown) {
+        st.progress = { done, total, what: 'Bajando' };
+        await P.downloadFile(files.get(f).id, path.join(UPLOAD_DIR, f));
+        done++;
+      }
+      if (toDown.length) dataVersion = Date.now(); // ya se pueden ver los videos y fotos nuevos
 
-    // 3) Subir los datos si aquí hay algo que Drive no tiene. (Si otro ordenador subió los suyos
-    // justo a la vez, en su próxima vuelta junta estos con los suyos: nada se pierde.)
-    const json = JSON.stringify(db);
-    if (json !== gPushed || !remoteDb) {
-      const up = await google.uploadFile('db.json', Buffer.from(json), { id: remoteDb?.id, type: 'application/json' });
-      gRemoteVersion = up.version ?? gRemoteVersion;
-      gPushed = json;
-    }
+      // 3) Subir los datos si aquí hay algo que Drive no tiene. (Si otro ordenador subió los suyos
+      // justo a la vez, en su próxima vuelta junta estos con los suyos: nada se pierde.)
+      const json = JSON.stringify(db);
+      if (json !== pushed || !remoteDb) {
+        const up = await P.uploadFile('db.json', Buffer.from(json), { id: remoteDb?.id, type: 'application/json' });
+        remoteVersion = up.version ?? remoteVersion;
+        pushed = json;
+      }
 
-    // 4) Limpieza (con margen de una hora, por si otro ordenador está subiendo lo suyo):
-    // en Drive, archivos que ya no usa nadie; aquí, los de cosas borradas en otro ordenador.
-    const hourAgo = Date.now() - 3600e3;
-    for (const [name, f] of files) {
-      if (name !== 'db.json' && (!refs.has(name) || linked.has(name)) && Date.parse(f.modifiedTime) < hourAgo) await google.deleteFile(f.id).catch(() => {});
-    }
-    for (const name of await fsp.readdir(UPLOAD_DIR).catch(() => [])) {
-      if (refs.has(name)) continue;
-      const st = await fsp.stat(path.join(UPLOAD_DIR, name)).catch(() => null);
-      if (st?.isFile() && st.mtimeMs < hourAgo) await fsp.unlink(path.join(UPLOAD_DIR, name)).catch(() => {});
-    }
+      // 4) Limpieza (con margen de una hora, por si otro ordenador está subiendo lo suyo):
+      // en Drive, archivos que ya no usa nadie; aquí, los de cosas borradas en otro ordenador.
+      const hourAgo = Date.now() - 3600e3;
+      for (const [name, f] of files) {
+        if (name !== 'db.json' && (!refs.has(name) || linked.has(name)) && Date.parse(f.modifiedTime) < hourAgo) await P.deleteFile(f.id).catch(() => {});
+      }
+      for (const name of await fsp.readdir(UPLOAD_DIR).catch(() => [])) {
+        if (refs.has(name)) continue;
+        const st = await fsp.stat(path.join(UPLOAD_DIR, name)).catch(() => null);
+        if (st?.isFile() && st.mtimeMs < hourAgo) await fsp.unlink(path.join(UPLOAD_DIR, name)).catch(() => {});
+      }
 
-    gsync.state = 'idle';
-    gsync.last = now();
-    gsync.progress = null;
-  } catch (e) {
-    gsync.state = 'error';
-    gsync.error = e.message;
-    gsync.progress = null;
-    console.error('[google]', e.message);
-  }
+      st.state = 'idle';
+      st.last = now();
+      st.progress = null;
+    } catch (e) {
+      st.state = 'error';
+      st.error = e.message;
+      st.progress = null;
+      console.error(`[${tag}]`, e.message);
+    }
+}
+  return { st, sync, soon, reset, info };
 }
 
-const googleInfo = () => ({ ...google.status(), ...gsync, state: google.connected() ? gsync.state : 'off' });
+const gs = makeSyncer('google', google);
+const ms = makeSyncer('mega', { ...mega, connected: mega.syncOn });
+const SYNCERS = [gs, ms];
+const gsync = gs.st;
+const syncGoogle = gs.sync;
+
+const googleInfo = () => ({ ...google.status(), ...gs.info() });
+const megaInfo = () => ({ ...mega.status(), ...ms.info() });
 const updateInfo = () => (DESKTOP ? { desktop: true, current: DESKTOP.version, ...DESKTOP.update } : { desktop: false });
 
 // ---------- compartir con otras personas (Firebase) ----------
@@ -482,14 +507,21 @@ const collab = createCollab({
 });
 
 /** Video compartido cuyo archivo aún no está aquí: para el navegador, «por descargar» (de Drive). */
-const forClient = (v) => (v.source?.drive && v.source.file && !fs.existsSync(path.join(UPLOAD_DIR, v.source.file))
+// Su archivo vive en otra nube (Drive compartido, o importado de tu cuenta de MEGA / Google Drive):
+// no se sincroniza, y cada ordenador lo baja de allí cuando le falta.
+const fromAccount = (v) => Boolean(v.source?.ref?.auth && v.source.platform === 'cloud');
+const remoteCopy = (v) => Boolean(v.source?.drive || fromAccount(v));
+const forClient = (v) => (remoteCopy(v) && v.source.file && !fs.existsSync(path.join(UPLOAD_DIR, v.source.file))
   ? { ...v, source: { ...v.source, file: null } }
   : v);
 
 /** Baja el archivo de un video compartido (de Drive, con su enlace) con el mismo nombre. */
 async function fetchShared(v0) {
   try {
-    await google.downloadShared(v0.source.drive, path.join(UPLOAD_DIR, v0.source.file));
+    const dest = path.join(UPLOAD_DIR, v0.source.file);
+    if (v0.source.drive) await google.downloadShared(v0.source.drive, dest);
+    else if (v0.source.ref.cloud === 'mega') await mega.downloadFile(v0.source.ref.id, dest);
+    else await google.downloadFile(v0.source.ref.id, dest);
   } catch (e) {
     const v = db.videos.find((x) => x.id === v0.id);
     if (v) {
@@ -512,6 +544,9 @@ if (!dataError) {
   // Con la cuenta de Google: al arrancar, y cada 45 s para traer lo de otros ordenadores.
   setTimeout(() => syncGoogle().catch(() => {}), 1500);
   setInterval(() => syncGoogle().catch(() => {}), 45000);
+  // Con MEGA (si está activado guardar ahí tus datos): igual, cada 60 s.
+  setTimeout(() => ms.sync().catch(() => {}), 2500);
+  setInterval(() => ms.sync().catch(() => {}), 60000);
   // Lo compartido: al arrancar y cada 2 minutos (para ver lo que añaden los demás y lo nuevo que te compartan).
   setTimeout(() => collab.sync().catch(() => {}), 3000);
   setInterval(() => collab.sync().catch(() => {}), Number(process.env.JR_COLLAB_EVERY) || 120000);
@@ -825,6 +860,11 @@ async function downloadSource(source) {
   if (source.platform === 'cloud' && source.ref?.auth && source.ref.cloud === 'gdrive') {
     const file = newId() + (path.extname(source.ref.name || '').toLowerCase() || '.mp4');
     await google.downloadFile(source.ref.id, path.join(UPLOAD_DIR, file));
+    return { file, mediaType: IMAGE_EXT.has(path.extname(file)) ? 'image' : 'video' };
+  }
+  if (source.platform === 'cloud' && source.ref?.auth && source.ref.cloud === 'mega') {
+    const file = newId() + (path.extname(source.ref.name || '').toLowerCase() || '.mp4');
+    await mega.downloadFile(source.ref.id, path.join(UPLOAD_DIR, file));
     return { file, mediaType: IMAGE_EXT.has(path.extname(file)) ? 'image' : 'video' };
   }
   if (source.platform === 'cloud') return cloud.download(source.ref, UPLOAD_DIR, newId());
@@ -1190,9 +1230,7 @@ async function handleApi(req, res, parts) {
     if (id === 'storage' && method === 'GET') return send(res, 200, await google.storage());
     if (id === 'logout' && method === 'POST') {
       await google.logout();
-      Object.assign(gsync, { state: 'off', error: null, progress: null });
-      gRemoteVersion = null;
-      gPushed = null;
+      gs.reset();
       return send(res, 200, googleInfo());
     }
     if (id === 'sync' && method === 'POST') {
@@ -1274,6 +1312,7 @@ async function handleApi(req, res, parts) {
       data: dataVersion,
       sync: { shared: SHARED, dataDir: DATA_DIR, host: HOST, others: await othersOpen() },
       google: googleInfo(),
+      mega: megaInfo(),
     });
   }
 
@@ -1366,6 +1405,71 @@ async function handleApi(req, res, parts) {
     db.videos.push(...videos);
     await saveDb();
     return send(res, 200, { libraries, videos: videos.map(forClient) });
+  }
+  if (resource === 'cloud' && id === 'mega') {
+    // Tu cuenta de MEGA: entrar (la contraseña no se guarda), ver tus carpetas, importar, y
+    // si quieres, guardar también tus datos en la carpeta «Diva Routine» de tu MEGA.
+    if (!action && method === 'GET') return send(res, 200, megaInfo());
+    if (action === 'login' && method === 'POST') {
+      const body = await readJson(req);
+      await mega.login(body);
+      return send(res, 200, megaInfo());
+    }
+    if (action === 'logout' && method === 'POST') {
+      await mega.logout();
+      ms.reset();
+      return send(res, 200, megaInfo());
+    }
+    if (action === 'sync' && method === 'POST') {
+      const body = await readJson(req);
+      if (body.on !== undefined) await mega.setSync(body.on);
+      if (mega.syncOn()) await ms.sync();
+      else ms.reset();
+      return send(res, 200, megaInfo());
+    }
+    if (action === 'storage' && method === 'GET') return send(res, 200, await mega.storageInfo());
+    if (action === 'browse' && method === 'GET') {
+      const fid = new URL(req.url, 'http://x').searchParams.get('id') || null;
+      const r = await mega.browse(fid);
+      for (const f of r.folders) f.libraries = db.libraries.filter((l) => l.cloudFolders?.some((c) => c.cloud === 'mega' && c.id === f.id)).map((l) => l.id);
+      return send(res, 200, r);
+    }
+    if (action === 'import' && method === 'POST') {
+      // { folders: [{ id, name }], files: [{ id, name }], libraryId }: cada carpeta, a una carpeta
+      // de aquí (la suya si ya se importó: entonces solo lo nuevo); los archivos sueltos, a libraryId.
+      const body = await readJson(req);
+      const target = db.libraries.find((l) => l.id === body.libraryId) || rootLibrary();
+      const mkVideo = (lib, f) => newVideo(lib.id, {
+        title: String(f.name).replace(/\.[^.]+$/, '').slice(0, 120),
+        source: { kind: 'link', url: 'https://mega.nz/', platform: 'cloud', cloud: 'mega', ref: { cloud: 'mega', auth: true, id: f.id, name: f.name }, file: null, mediaType: null },
+      });
+      const created = [];
+      const libs = [];
+      for (const fo of body.folders || []) {
+        const media = await mega.folderMedia(String(fo.id));
+        let lib = db.libraries.find((l) => l.cloudFolders?.some((c) => c.cloud === 'mega' && c.id === fo.id));
+        if (!lib) {
+          lib = { id: newId(), name: String(fo.name || 'MEGA').slice(0, 60), parentId: target.root ? null : target.id, createdAt: now() };
+          db.libraries.push(lib);
+        }
+        lib.cloudFolders ||= [];
+        let link = lib.cloudFolders.find((c) => c.cloud === 'mega' && c.id === fo.id);
+        if (!link) lib.cloudFolders.push((link = { cloud: 'mega', id: String(fo.id), name: String(fo.name || ''), seen: [] }));
+        const seen = new Set(link.seen);
+        for (const f of media) {
+          if (seen.has(f.id)) continue;
+          seen.add(f.id);
+          created.push(mkVideo(lib, f));
+        }
+        link.seen = [...seen];
+        link.syncedAt = now();
+        libs.push(lib);
+      }
+      for (const f0 of body.files || []) created.push(mkVideo(target, await mega.fileInfo(String(f0.id))));
+      db.videos.push(...created);
+      await saveDb();
+      return send(res, 200, { libraries: libs, created: created.map(forClient) });
+    }
   }
   if (resource === 'cloud' && id === 'gdrive' && action === 'folders' && method === 'GET') {
     // Tus carpetas de Google Drive (cuenta conectada en Redes), y si ya están importadas.
@@ -1759,7 +1863,7 @@ async function handleApi(req, res, parts) {
       return send(res, 200, v);
     }
     if (action === 'fetch' && method === 'POST') {
-      if (v.source.drive && v.source.file) {
+      if (remoteCopy(v) && v.source.file) {
         // Compartido por otra persona (o subido desde otro ordenador tuyo): de su Drive.
         if (!fs.existsSync(path.join(UPLOAD_DIR, v.source.file))) {
           if (!fetching.has(v.id)) fetching.set(v.id, fetchShared(v).finally(() => fetching.delete(v.id)));

@@ -25,7 +25,7 @@ export function renderRoutine(root, id) {
     <div class="page-head no-print">
       <a href="#/rutinas" class="back">← Rutinas</a>
       <span class="spacer"></span>
-      <button class="btn small" data-act="add" title="Elegir más dibujos en Rutinas">+ Añadir ejercicios</button>
+      <button class="btn small" data-act="add" title="Elegir más secuencias en Rutinas">+ Añadir ejercicios</button>
       <button class="btn small" data-act="pin" id="pinBtn"></button>
       <button class="btn small" data-act="share" title="Que otras personas puedan ver y cambiar esta rutina">${SHARE_TAG}Editores</button>
       <button class="btn primary" data-act="print">Imprimir / PDF</button>
@@ -43,10 +43,10 @@ export function renderRoutine(root, id) {
     <section class="rt-tray">
       <div class="rt-tray-head">
         <div class="rt-tray-tabs" role="tablist" aria-label="Herramientas de la rutina">
-          <button type="button" role="tab" id="trayDrawingsTab" aria-controls="trayDrawingsPanel" aria-selected="true" data-tray-tab="drawings">Dibujos</button>
+          <button type="button" role="tab" id="trayDrawingsTab" aria-controls="trayDrawingsPanel" aria-selected="true" data-tray-tab="drawings">Secuencias de ejercicios</button>
           <button type="button" role="tab" id="trayStylesTab" aria-controls="trayStylesPanel" aria-selected="false" tabindex="-1" data-tray-tab="styles">Estilo de tabla</button>
         </div>
-        <input id="trayQ" type="search" placeholder="Buscar dibujos…" aria-label="Buscar dibujos…">
+        <input id="trayQ" type="search" placeholder="Buscar secuencias…" aria-label="Buscar secuencias…">
       </div>
       <div id="trayDrawingsPanel" role="tabpanel" aria-labelledby="trayDrawingsTab">
       <div class="rt-tray-list">${drawings().map((e) => `<figure draggable="true" data-tray="${e.id}" data-q="${esc(`${e.title} ${e.category || ''}`.toLocaleLowerCase(lang))}" title="${esc(e.title)}">${phasesSVG((e.keyframes || []).slice(0, 1), { size: 100, numbers: false })[0]?.svg || ''}<figcaption class="tray-name">${esc(e.title)}</figcaption></figure>`).join('')}</div>
@@ -161,7 +161,7 @@ export function renderRoutine(root, id) {
               <button data-mv="1" data-i="${i}" title="Bajar un puesto">↓</button>
               <button data-rm="${i}" title="Quitar de la rutina">✕</button>
               ${v ? `<a class="tool-link" href="#/video/${e.videoId}" title="Abrir el video para editar este ejercicio">↗</a>` : ''}
-              ${(e.keyframes || []).some((k) => k.img) ? `<button class="ai-btn" data-ai="${e.id}" title="Mejorar estos dibujos con IA">IA</button>` : ''}
+              ${(e.keyframes || []).some((k) => k.img) ? `<button class="ai-btn" data-ai="${e.id}" title="Mejorar con IA las viñetas marcadas (sin ninguna marcada, toda la secuencia)">IA</button>` : ''}
               ${(e.keyframes || []).some((k) => k.origImg) ? `<button data-ai-undo="${e.id}" title="Volver a los dibujos originales">↺</button>` : ''}
             </td>
           </tr>`;
@@ -250,8 +250,10 @@ export function renderRoutine(root, id) {
     if (aiEx) {
       const it = r.items[+aiEx.closest('.ritem').dataset.i];
       const own = exerciseById(it.exerciseId);
-      const ks = [...(picked.get(it) || [])];
-      if (!ks.length) return toast('Marca antes las viñetas que quieres mejorar con IA', 'error');
+      // Con viñetas marcadas, solo esas; sin ninguna, toda la secuencia de la fila (las que se ven y tienen imagen).
+      const marked = [...(picked.get(it) || [])];
+      const ks = marked.length ? marked : phaseOrder(it, own).filter((k) => framesOf(it, own)[k]?.img);
+      if (!ks.length) return toast('Esta secuencia no tiene viñetas que mejorar con IA', 'error');
       const n = (own.keyframes || []).length;
       // Una viñeta añadida se redibuja en su dibujo de origen y se copia aquí.
       const origin = (k) => state.exercises.flatMap((x) => (x.keyframes || []).map((f, i) => ({ ex: x, i, f }))).find((o) => o.f.img === it.extra[k - n]?.img);

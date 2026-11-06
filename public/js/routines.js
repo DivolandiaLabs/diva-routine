@@ -62,7 +62,7 @@ export function renderRoutines(root) {
         <nav class="shelf-bar" id="rtTabs" aria-label="Grupos de rutinas"></nav>
         <header class="lib-top">
           <nav class="crumbs" id="rtTitle"></nav>
-          <input id="q" type="search" placeholder="Buscar dibujos o rutinas…" aria-label="Buscar">
+          <input id="q" type="search" placeholder="Buscar secuencias o rutinas…" aria-label="Buscar">
           <div class="lib-tools rt-tools">
             <button class="pin-jump" id="pinJump" data-pin-jump disabled title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
             <label class="sorter" title="Ordenar">${SORT_ICON}<select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
@@ -72,7 +72,7 @@ export function renderRoutines(root) {
         </div>
         <h3 class="sec-title">Rutinas <small id="nRt"></small></h3>
         <div class="tiles" id="rtGrid"></div>
-        <h3 class="sec-title">Dibujos <small id="nEx"></small></h3>
+        <h3 class="sec-title">Secuencias de ejercicios <small id="nEx"></small></h3>
         <p class="hint" id="exHint"></p>
         <div class="tiles" id="exGrid"></div>
       </section>
@@ -274,34 +274,34 @@ export function renderRoutines(root) {
           ? `<span class="mosaic m${shown.length}">${shown.map((e) => `<span>${exerciseFigure(e, 120)}</span>`).join('')}</span>`
           : '<span class="folder-empty">Vacía</span>'}</a>
         <a class="tile-body" href="#/rutina/${r.id}">
-          <h3>${ICON.routine}<span>${esc(r.name)}</span></h3>
-          <div class="meta"><span>${exs.length} ejercicio${exs.length === 1 ? '' : 's'}</span>${r.pinned ? '<span class="badge b-routine" title="Se ve en la página principal">En inicio</span>' : ''}${shareTag('routine', r)}</div>
+          <h3>${ICON.routine}<span data-edit-rt contenteditable="plaintext-only" spellcheck="false" title="Clic para cambiar el nombre">${esc(r.name)}</span></h3>
+          <div class="meta"><span>${exs.length} ejercicio${exs.length === 1 ? '' : 's'}</span>${shareTag('routine', r)}</div>
         </a>
       </article>`;
   };
 
-  // Recuadro donde soltar dibujos para crear una rutina nueva con ellos (o clic: panel de crear).
+  // Recuadro donde soltar dibujos para crear una rutina nueva con ellos (o clic: una vacía).
   const newRoutineTile = () => `
-    <button class="tile tile-new-routine" data-new-routine title="Suelta aquí dibujos para crear una rutina nueva con ellos">
-      <span class="nr-plus">+</span><span>Nueva rutina</span><small>Arrastra aquí dibujos</small>
+    <button class="tile tile-new-routine" data-new-routine title="Clic: crea una rutina vacía · suelta aquí secuencias de ejercicios para crear una con ellas">
+      <span class="nr-plus">+</span><span>Nueva rutina</span><small>Arrastra aquí secuencias</small>
     </button>`;
 
   // Primer recuadro de Dibujos: abre el buscador de lo importado.
   const addDrawingTile = () => `
     <button class="tile tile-new-routine tile-add-drawing" data-pick-library title="Busca en tus bibliotecas un video o una foto para sacar sus dibujos">
-      <span class="nr-plus">+</span><span>Añadir dibujo</span><small>Elige de tus bibliotecas</small>
+      <span class="nr-plus">+</span><span>Añadir secuencia</span><small>Elige de tus bibliotecas</small>
     </button>`;
 
   const drawingTile = (e) => {
     const v = videoById(e.videoId);
     const phases = phasesSVG(e.keyframes, { size: 120, numbers: false }).slice(0, 4);
     // Sin su video aquí (un dibujo que te compartieron): no hay video que abrir.
-    const link = v ? `href="#/video/${e.videoId}" title="Abrir el video (para cambiar el tramo)"` : `data-share-ex="${e.id}" title="${esc(sharedLabel(spaceFor('drawing', e.id)) || 'Dibujo compartido contigo')}"`;
+    const link = v ? `href="#/video/${e.videoId}" title="Abrir el video (para cambiar el tramo)"` : `data-share-ex="${e.id}" title="${esc(sharedLabel(spaceFor('drawing', e.id)) || 'Secuencia compartida contigo')}"`;
     return `
-      <article class="tile tile-drawing ${fresh.has(e.id) ? 'new' : ''}" data-kind="drawing" data-id="${e.id}" draggable="true" title="Arrastra a una rutina para añadirlo, o sobre otro dibujo para cambiar su orden">
+      <article class="tile tile-drawing ${fresh.has(e.id) ? 'new' : ''}" data-kind="drawing" data-id="${e.id}" draggable="true" title="Arrastra a una rutina para añadirla, o sobre otra secuencia para cambiar su orden">
         <label class="sel" title="Elegir para la rutina (el número es su orden)"><input type="checkbox" data-sel-ex="${e.id}"><b class="order"></b></label>
         <button class="card-pin${e.pinnedTop ? ' on' : ''}" data-pin-ex="${e.id}" title="${e.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${e.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(e.title)}" aria-pressed="${Boolean(e.pinnedTop)}">${PIN}</button>
-        <button class="card-del" data-del-ex="${e.id}" title="Borrar este dibujo (sale también de las rutinas)" aria-label="Borrar ${esc(e.title)}">✕</button>
+        <button class="card-del" data-del-ex="${e.id}" title="Borrar esta secuencia (sale también de las rutinas)" aria-label="Borrar ${esc(e.title)}">✕</button>
         <a class="tile-thumb" ${link}><span class="mosaic m${phases.length}">${phases.map((p) => `<span>${p.svg}</span>`).join('')}</span></a>
         <div class="tile-body">
           <h3><span data-edit-ex="title" contenteditable="plaintext-only" spellcheck="false" title="Clic para editar">${esc(e.title)}</span></h3>
@@ -447,9 +447,11 @@ export function renderRoutines(root) {
     $('#nEx').textContent = `(${exs.length})`;
     $('#rtGrid').innerHTML = newRoutineTile() + rts.map(routineTile).join('')
       + (!rts.length && state.routines.length ? '<p class="hint">Ninguna rutina coincide con la búsqueda.</p>' : '');
+    // Con secuencias no hace falta explicación; sin ninguna, se dice cómo sacarlas.
+    $('#exHint').hidden = drawings().length > 0;
     $('#exHint').innerHTML = drawings().length
-      ? '<b>Arrastra</b> un dibujo hasta una rutina para añadirlo (si tienes varios marcados, van todos, en su orden), o márcalos en orden y pulsa <b>Rutina</b>.'
-      : 'Aún no hay dibujos. En la <a href="#/biblioteca">Biblioteca</a> selecciona videos o carpetas y pulsa <b>Dibujos</b>.';
+      ? ''
+      : 'Aún no hay secuencias de ejercicios. En la <a href="#/biblioteca">Biblioteca</a> selecciona videos o carpetas y pulsa <b>Dibujos</b>.';
     $('#exGrid').innerHTML = addDrawingTile() + exs.map(drawingTile).join('');
     drawPicks();
     drawJump();
@@ -464,7 +466,7 @@ export function renderRoutines(root) {
     jump.disabled = !tiles.length;
     if (!tiles.length) {
       jump.querySelector('b').textContent = tr('Nada anclado');
-      jump.title = jump.ariaLabel = tr('Pasa el ratón por una rutina o un dibujo y pulsa su pin');
+      jump.title = jump.ariaLabel = tr('Pasa el ratón por una rutina o una secuencia y pulsa su pin');
       return;
     }
     const name = tiles[Math.min(at, tiles.length - 1)].querySelector('h3 span')?.textContent || '';
@@ -511,24 +513,26 @@ export function renderRoutines(root) {
         ${ICON[key]}<span>${label}</span>${badge ? `<b class="order">${badge}</b>` : ''}
       </button>`;
     $('#opts').innerHTML = [
-      item('create', 'Rutina', { badge: pickedEx.length, ready: pickedEx.length > 0 && panel !== 'create', title: 'Montar una rutina con los dibujos elegidos' }),
+      item('create', 'Rutina', { badge: pickedEx.length, ready: pickedEx.length > 0 && panel !== 'create', title: 'Montar una rutina con las secuencias elegidas' }),
       item('pin', 'Bibliotecas', { badge: pickedRt.length, disabled: !pickedRt.length, title: 'Elegir en qué bibliotecas se ven las rutinas marcadas' }),
-      item('copy', 'Copiar', { badge: pickedEx.length + pickedRt.length, disabled: !(pickedEx.length + pickedRt.length), title: 'Duplicar las rutinas y dibujos marcados' }),
+      item('copy', 'Copiar', { badge: pickedEx.length + pickedRt.length, disabled: !(pickedEx.length + pickedRt.length), title: 'Duplicar las rutinas y secuencias marcadas' }),
       item('move', 'Mover', { badge: pickedRt.length, disabled: !pickedRt.length, title: 'Mover las rutinas marcadas a otra pestaña' }),
       item('undo', 'Deshacer', { disabled: !undoStack.length, title: 'Deshacer el último cambio' }),
       item('share', 'Compartir', {
         disabled: !target,
-        title: !target ? 'Elige un dibujo o una rutina para compartirlo con otras personas'
-          : target.type === 'routine' ? 'Añadir editores a esta rutina' : 'Compartir este dibujo con otras personas',
+        title: !target ? 'Elige una secuencia o una rutina para compartirla con otras personas'
+          : target.type === 'routine' ? 'Añadir editores a esta rutina' : 'Compartir esta secuencia con otras personas',
       }),
       '<span class="opt-sep"></span>',
-      item('selectAll', 'Todo', { title: 'Elegir o quitar todos los dibujos que se ven' }),
+      item('selectAll', 'Todo', { title: 'Elegir o quitar todas las secuencias que se ven' }),
       item('trash', 'Borrar', { badge: pickedEx.length + pickedRt.length, disabled: !pickedEx.length && !pickedRt.length, danger: true, title: 'Borrar lo elegido' }),
     ].join('');
   };
 
   let busy = null; // texto mientras se crea la rutina
   let createTableStyle = 'classic';
+  // Orden, pestaña, destino y estilo de tabla van plegados en «Opciones»; se recuerda si lo abres.
+  let optsOpen = false;
   root.addEventListener('change', (e) => {
     if (e.target.matches('[name="newRoutineTableStyle"]')) createTableStyle = normalizeTableStyle(e.target.value);
   });
@@ -545,28 +549,30 @@ export function renderRoutines(root) {
     const keep = {};
     box.querySelectorAll('input, select').forEach((el) => el.id && (keep[el.id] = el.value));
     const pickScroll = box.querySelector('.rp-pick-list')?.scrollTop || 0;
+    optsOpen = box.querySelector('.rp-opts')?.open ?? optsOpen;
     const target = ui.routineTarget && routineById(ui.routineTarget);
     const names = pickedEx.map(exerciseById).filter(Boolean);
     box.innerHTML = `
-      <header><h3>${target ? `Añadir a «${esc(target.name)}»` : 'Crear rutina'}</h3><button class="x" data-close aria-label="Cerrar">✕</button></header>
-      ${names.length
-        ? `<ol class="rp-list">${names.map((e) => `<li><span class="rp-t">${esc(e.title)}</span><span class="rp-s">${esc(e.category || '')}</span></li>`).join('')}</ol>`
-        : ''}
+      <header>
+        <input id="rname" class="panel-title-input" value="${esc(tr(`Rutina ${new Date().toLocaleDateString(lang)}`))}" aria-label="Nombre de la rutina nueva" title="Haz clic para cambiar el nombre">
+        <h3 id="addTitle" hidden></h3>
+        <button class="x" data-close aria-label="Cerrar">✕</button></header>
       <div class="rp-pick">
-        <input id="pickQ" type="search" placeholder="Buscar dibujos…" aria-label="Buscar dibujos…" value="${esc(pickQ)}">
+        <input id="pickQ" type="search" placeholder="Buscar" aria-label="Buscar" value="${esc(pickQ)}">
         <div class="rp-pick-list">${drawings().map((e) => `<label data-q="${esc(`${e.title} ${e.category || ''}`.toLocaleLowerCase(lang))}"><input type="checkbox" data-sel-ex="${e.id}" ${pickedEx.includes(e.id) ? 'checked' : ''}><span class="rp-t">${esc(e.title)}</span><span class="rp-s">${esc(e.category || '')}</span></label>`).join('')}</div>
       </div>
+      <details class="ai-box rp-opts" ${optsOpen ? 'open' : ''}>
+      <summary>Opciones</summary>
       <label class="field">Orden<select id="order">
         <option value="manual">Como los he elegido</option>
         <option value="auto">Automático (como una clase)</option>
       </select></label>
       <label class="field" id="toTabBox">Pestaña<select id="toTab"><option value="">Todas las Rutinas</option>${tabs().map((t) => `<option value="${t.id}" ${t.id === activeTab ? 'selected' : ''}>${esc(tabName(t))}</option>`).join('')}</select></label>
-      <label class="field">En<select id="toRoutine"><option value="">Rutina nueva</option>${state.routines.map((r) => `<option value="${r.id}" ${r.id === target?.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
-      <label class="field" id="rnameField">Nombre<input id="rname" value="${esc(tr(`Rutina ${new Date().toLocaleDateString(lang)}`))}"></label>
+      <input type="hidden" id="toRoutine" value="${target?.id || ''}">
       <div id="newRoutineStyle">${tableStylePicker(createTableStyle, 'newRoutineTableStyle')}</div>
+      </details>
       <div class="row wrap">
         <button class="btn primary" data-act="create" ${names.length && !busy ? '' : 'disabled'}>${busy ? esc(busy) : 'Crear rutina'}</button>
-        ${names.length ? '<button class="btn ghost" data-act="clear">Quitar selección</button>' : ''}
       </div>`;
     box.querySelector('.rp-pick-list').scrollTop = pickScroll;
     filterPick();
@@ -582,7 +588,10 @@ export function renderRoutines(root) {
     const sel = $('#toRoutine');
     if (!sel) return;
     $('#toTabBox').hidden = Boolean(sel.value);
-    $('#rnameField').hidden = Boolean(sel.value);
+    // Rutina nueva: su nombre, editable, de título. Si se añade a una que ya existe, a cuál.
+    $('#rname').hidden = Boolean(sel.value);
+    $('#addTitle').hidden = !sel.value;
+    $('#addTitle').textContent = sel.value ? `Añadir a «${routineById(sel.value)?.name || ''}»` : '';
     $('#newRoutineStyle').hidden = Boolean(sel.value);
     if (!busy) $('[data-act="create"]').textContent = sel.value ? 'Añadir a la rutina' : 'Crear rutina';
   };
@@ -590,7 +599,7 @@ export function renderRoutines(root) {
   drawGrids();
   drawPanel();
   if (fresh.size) {
-    toast(`${fresh.size} dibujo(s) listos y ya elegidos. Ordénalos si quieres y pulsa «Crear rutina».`);
+    toast(`${fresh.size} secuencia(s) lista(s) y ya elegida(s). Ordénalas si quieres y pulsa «Crear rutina».`);
     setTimeout(() => $('.tile.new')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 200);
   }
 
@@ -598,7 +607,7 @@ export function renderRoutines(root) {
 
   async function deletePicked(exIds, rtIds) {
     const parts = [];
-    if (exIds.length) parts.push(tr(`${exIds.length} dibujo${exIds.length === 1 ? '' : 's'}`));
+    if (exIds.length) parts.push(tr(`${exIds.length} secuencia${exIds.length === 1 ? '' : 's'}`));
     if (rtIds.length) parts.push(tr(`${rtIds.length} rutina${rtIds.length === 1 ? '' : 's'}`));
     if (!parts.length) return;
     // Lo que te compartieron no se borra para nadie: sales de ello.
@@ -607,7 +616,7 @@ export function renderRoutines(root) {
     const shared = exIds.some((id) => spaceFor('drawing', id)?.mine) || rtIds.some((id) => spaceFor('routine', id)?.mine);
     if (!await ask([
       tr(`¿Borrar ${parts.join(` ${tr('y')} `)}?`),
-      exIds.length && tr('Los dibujos borrados salen también de las rutinas (los videos no se borran).'),
+      exIds.length && tr('Las secuencias borradas salen también de las rutinas (los videos no se borran).'),
       tr(usedInRoutines(exIds)),
       nLeave && tr(`De ${nLeave === 1 ? 'lo que te compartieron' : `las ${nLeave} cosas que te compartieron`}, solo sales tú.`),
       shared && tr('Lo que compartes dejará de verse para los demás.'),
@@ -672,7 +681,20 @@ export function renderRoutines(root) {
   root.addEventListener('click', async (e) => {
     const t = e.target;
     if (t.closest('[data-close]')) return ((panel = null), drawPanel());
-    if (t.closest('[data-new-routine]')) return ((panel = 'create'), drawPanel());
+    // Nueva rutina: se crea vacía y se queda aquí, sin pasar por el panel de crear.
+    if (t.closest('[data-new-routine]')) {
+      try {
+        const r = upsert('routines', await api.createRoutine({ name: tr(`Rutina ${new Date().toLocaleDateString(lang)}`), items: [], tableStyle: 'classic' }));
+        if (tabNow()) await putInTab(r.id, tabNow());
+        emit('data');
+        root.querySelector(`.tile-routine[data-id="${r.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        flash(r.id);
+        toast(`Rutina nueva «${r.name}». Arrastra secuencias hasta ella o ábrela para añadirlas.`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
     if (t.closest('[data-pick-library]')) return openLibraryPicker();
     if (t.closest('[data-pin-jump]')) return jumpToPinned();
     const pin = t.closest('[data-pin-rt], [data-pin-ex]');
@@ -745,7 +767,7 @@ export function renderRoutines(root) {
       drawPanel();
       try {
         const routine = await routineFrom([...pickedEx], {
-          name: $('#rname').value.trim() || 'Rutina',
+          name: $('#rname').value.trim() || tr(`Rutina ${new Date().toLocaleDateString(lang)}`),
           order: $('#order').value,
           routineId: $('#toRoutine').value || null,
           tableStyle: createTableStyle,
@@ -769,22 +791,43 @@ export function renderRoutines(root) {
   let draggedRt = null; // rutina que se lleva a una pestaña
   let draggedTab = null; // pestaña que se cambia de sitio
 
-  // Los textos de un dibujo se editan encima: Intro guarda, Esc deja lo que había.
+  // Los textos de un dibujo, y el nombre de una rutina, se editan encima: Intro guarda, Esc deja lo que había.
   let editStart = '';
+  const editing = (el) => Boolean(el?.dataset && (el.dataset.editEx || 'editRt' in el.dataset));
   root.addEventListener('focusin', (e) => {
-    if (e.target.dataset?.editEx) editStart = e.target.textContent;
+    if (editing(e.target)) editStart = e.target.textContent;
   });
   root.addEventListener('mousedown', (e) => {
-    const tile = e.target.closest?.('.tile-drawing');
-    if (tile) tile.draggable = !e.target.dataset?.editEx;
+    const tile = e.target.closest?.('.tile-drawing, .tile-routine');
+    if (tile) tile.draggable = !editing(e.target);
+  });
+  // El nombre de la rutina va dentro del enlace que la abre: un clic en él edita, no abre.
+  root.addEventListener('click', (e) => {
+    if (e.target.closest?.('[data-edit-rt]')) e.preventDefault();
   });
   root.addEventListener('keydown', (e) => {
-    if (!e.target.dataset?.editEx || (e.key !== 'Enter' && e.key !== 'Escape')) return;
+    if (!editing(e.target) || (e.key !== 'Enter' && e.key !== 'Escape')) return;
     e.preventDefault();
     if (e.key === 'Escape') e.target.textContent = editStart;
     e.target.blur();
   });
   root.addEventListener('focusout', async (e) => {
+    if (e.target.dataset && 'editRt' in e.target.dataset) {
+      const tile = e.target.closest('.tile-routine');
+      tile.draggable = true;
+      const name = e.target.textContent.trim();
+      if (!name || name === editStart.trim()) return void (e.target.textContent = editStart);
+      const id = tile.dataset.id;
+      const before = routineById(id).name;
+      try {
+        upsert('routines', await api.updateRoutine(id, { name }));
+        remember(async () => upsert('routines', await api.updateRoutine(id, { name: before })));
+      } catch (err) {
+        e.target.textContent = editStart;
+        toast(err.message, 'error');
+      }
+      return;
+    }
     const field = e.target.dataset?.editEx;
     if (!field) return;
     e.target.closest('.tile-drawing').draggable = true;
@@ -856,6 +899,28 @@ export function renderRoutines(root) {
   }
 
   const tabTarget = (e) => (draggedRt || draggedTab ? e.target.closest?.('[data-drop-tab]') : null);
+  // Arrastrando un dibujo cerca del borde de arriba (bajo las barras fijas) o de abajo, la página
+  // se desplaza sola, más deprisa cuanto más cerca del borde: así se llega a las rutinas.
+  let dragY = null;
+  let dragAt = 0;
+  let edgeRaf = 0;
+  const EDGE = 110;
+  const edgeScroll = () => {
+    // Sin dragover reciente el arrastre ya acabó (aunque no llegara el dragend): se para.
+    if (dragY == null || Date.now() - dragAt > 400) return (edgeRaf = 0);
+    const top = $('.lib-sticky')?.getBoundingClientRect().bottom || 0;
+    const v = dragY < top + EDGE ? -Math.min(28, Math.ceil((top + EDGE - dragY) / 5))
+      : dragY > innerHeight - EDGE ? Math.min(28, Math.ceil((dragY - innerHeight + EDGE) / 5)) : 0;
+    if (v) scrollBy(0, v);
+    edgeRaf = requestAnimationFrame(edgeScroll);
+  };
+  const onDragEdge = (e) => {
+    if (!dragged) return;
+    dragY = e.clientY;
+    dragAt = Date.now();
+    if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeScroll);
+  };
+  document.addEventListener('dragover', onDragEdge);
   root.addEventListener('dragover', (e) => {
     if (tabTarget(e)) e.preventDefault();
     const slot = drawingTarget(e);
@@ -882,6 +947,9 @@ export function renderRoutines(root) {
   });
   const endDrag = () => {
     dragged = null;
+    dragY = null;
+    cancelAnimationFrame(edgeRaf);
+    edgeRaf = 0;
     draggedRt = null;
     draggedTab = null;
     root.classList.remove('drag-tab');
@@ -927,7 +995,7 @@ export function renderRoutines(root) {
         if (tabNow()) await putInTab(r.id, tabNow());
         emit('data');
         flash(r.id);
-        toast(`Rutina nueva «${r.name}» con ${ids.length} dibujo(s). Ábrela para ponerle nombre, reps y notas.`);
+        toast(`Rutina nueva «${r.name}» con ${ids.length} secuencia(s). Ábrela para ponerle nombre, reps y notas.`);
       } else {
         const r = routineById(t.dataset.id);
         const already = new Set(r.items.map((it) => it.exerciseId));
@@ -936,7 +1004,7 @@ export function renderRoutines(root) {
         await routineFrom(add, { routineId: r.id });
         emit('data');
         flash(r.id);
-        toast(`${add.length} dibujo(s) añadido(s) a «${r.name}»${add.length < ids.length ? ` (${ids.length - add.length} ya estaba${ids.length - add.length === 1 ? '' : 'n'})` : ''}`);
+        toast(`${add.length} secuencia(s) añadida(s) a «${r.name}»${add.length < ids.length ? ` (${ids.length - add.length} ya estaba${ids.length - add.length === 1 ? '' : 'n'})` : ''}`);
       }
     } catch (err) {
       toast(err.message, 'error');
@@ -987,6 +1055,15 @@ export function renderRoutines(root) {
     const i = VIEWS.findIndex(([k]) => k === view) + (e.deltaY > 0 ? 1 : -1);
     if (i >= 0 && i < VIEWS.length) setView(VIEWS[i][0]);
   }, { passive: false });
+  // La rueda mueve de lado la fila de rutinas; al llegar a un extremo, sigue la página.
+  root.addEventListener('wheel', (e) => {
+    const row = !e.ctrlKey && e.target.closest('#rtGrid');
+    if (!row || row.scrollWidth <= row.clientWidth || !e.deltaY) return;
+    const end = row.scrollWidth - row.clientWidth;
+    if ((e.deltaY < 0 && row.scrollLeft <= 0) || (e.deltaY > 0 && row.scrollLeft >= end - 1)) return;
+    e.preventDefault();
+    row.scrollLeft += e.deltaY;
+  }, { passive: false });
 
   const onKey = (e) => {
     if (e.key === 'Escape' && panel) ((panel = null), drawPanel());
@@ -1004,5 +1081,6 @@ export function renderRoutines(root) {
   return () => {
     window.removeEventListener('store', onStore);
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('dragover', onDragEdge);
   };
 }

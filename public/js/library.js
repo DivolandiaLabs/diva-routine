@@ -2,6 +2,7 @@
 // opciones (importar, subir, carpeta nueva, Instagram, seleccionar, rutina, mover, borrar).
 // Cada opción abre su panel entre la cuadrícula y el menú.
 import { api as baseApi, createApi } from './api.js';
+import { mountMega, openMegaPicker } from './mega.js';
 const historyOwner = (() => {
   try {
     const id = sessionStorage.getItem('jr-library-undo') || crypto.randomUUID();
@@ -112,10 +113,10 @@ export function renderLibrary(root, libraryId) {
     return Boolean(sp && (sp.members.length > 1 || !sp.mine));
   };
   const shelfBar = () => `<nav class="shelf-bar" aria-label="Bibliotecas">${shelves().map((l) => `
-      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}${shelfShared(l) ? ' shared' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Haz clic para cambiar el nombre · mantén pulsado para moverla' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
+      <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}${shelfShared(l) ? ' shared' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Doble clic para cambiar el nombre · mantén pulsado para moverla' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
       <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button>
     </nav>`;
-  const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Haz clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${`<button class="shelf-share" data-share-folder="${shelf.id}" title="Compartir esta biblioteca entera" aria-label="Compartir la biblioteca ${esc(shelfName(shelf))}">${SHARE_TAG}${shelfShared(shelf) ? `<span>${spaceFor('folder', shelf.id).members.length}</span>` : ''}</button>`}${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
+  const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Doble clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${`<button class="shelf-share" data-share-folder="${shelf.id}" title="Compartir esta biblioteca entera" aria-label="Compartir la biblioteca ${esc(shelfName(shelf))}">${SHARE_TAG}${shelfShared(shelf) ? `<span>${spaceFor('folder', shelf.id).members.length}</span>` : ''}</button>`}${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
   // Vistas como en el explorador de archivos (se recuerda la elegida). Ctrl + rueda cambia de una a otra.
   // Cómo se ordena lo de cada carpeta: el orden propio (arrastrando) o por fecha, nombre o tipo.
   let sortBy = 'custom';
@@ -207,10 +208,9 @@ export function renderLibrary(root, libraryId) {
           <nav class="crumbs">${folder
             ? `<a href="#/biblioteca/${shelf.id}" data-drop-lib="${shelf.id}" title="Suelta aquí para sacar a «${esc(shelfName(shelf))}»">${esc(shelfName(shelf))}</a><span>›</span>
                ${folderPath(folder).slice(0, -1).map((a) => `<a href="#/biblioteca/${a.id}" data-drop-lib="${a.id}" title="Suelta aquí para mover a «${esc(a.name)}»">${esc(a.name)}</a><span>›</span>`).join('')}
-               <input id="libName" class="title-input" value="${esc(folder.name)}" aria-label="Nombre de la carpeta" title="Haz clic para cambiar el nombre">
+               <input id="libName" class="title-input" value="${esc(folder.name)}" aria-label="Nombre de la carpeta" title="Doble clic para cambiar el nombre" readonly>
                <button class="icon-btn" data-act="rename" title="Cambiar el nombre de la carpeta" aria-label="Cambiar el nombre">${PENCIL}</button>`
             : shelfTitle()}</nav>
-          <span class="count" id="count"></span>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
           <div class="lib-tools">
             <button class="pin-jump" id="pinJump" data-pin-jump hidden title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
@@ -225,6 +225,7 @@ export function renderLibrary(root, libraryId) {
         <div class="ig-linked share-bar" id="shareBar" hidden></div>
         <div class="ig-linked" id="igLinked" hidden></div>
         <div class="tiles" id="grid"></div>
+        <p class="count lib-count" id="count"></p>
         <div class="drop-hint">Suelta aquí para importar${folder ? ` en «${esc(folder.name)}»` : ''}</div>
       </section>
       <aside class="panel" id="panel" hidden></aside>
@@ -496,6 +497,7 @@ export function renderLibrary(root, libraryId) {
       <div class="row wrap">
         <button class="btn primary" data-act="import">Importar</button>
         <button class="btn" data-act="upload">Subir archivos…</button>
+        <button class="btn" data-act="mega" title="Elegir carpetas y archivos de tu cuenta de MEGA">${CLOUDS.mega.icon} MEGA…</button>
         <button class="btn" data-act="target-new" title="Crear una carpeta dentro de la elegida">+ Carpeta</button>
       </div>
       <div class="row link-add" id="targetNewRow" hidden><input id="targetNew" placeholder="Nombre de la carpeta" aria-label="Nombre de la carpeta"><button class="btn primary" data-act="target-create">Crear</button></div>
@@ -514,7 +516,10 @@ export function renderLibrary(root, libraryId) {
 
     cloud: () => `${panelHead('Nube')}
       ${netCard('gdrive')}
-      ${['dropbox', 'onedrive', 'mega'].map((key) => `<section class="net-card" style="--net:${CLOUDS[key].color}">
+      <section class="net-card" style="--net:${CLOUDS.mega.color}">
+        <h4>${CLOUDS.mega.icon}${CLOUDS.mega.name}</h4><div data-mega-slot></div>
+      </section>
+      ${['dropbox', 'onedrive'].map((key) => `<section class="net-card" style="--net:${CLOUDS[key].color}">
         <h4>${CLOUDS[key].icon}${CLOUDS[key].name}</h4>
         <p class="hint">Pega sus links compartidos (de un archivo o de una carpeta) en <b>Importar</b>. Enlazar la cuenta llegará pronto.</p>
       </section>`).join('')}
@@ -566,6 +571,7 @@ export function renderLibrary(root, libraryId) {
     drawPanel();
   });
 
+  let megaCard = null;
   const drawPanel = () => {
     const box = $('#panel');
     box.hidden = !PANELS[panel];
@@ -575,6 +581,12 @@ export function renderLibrary(root, libraryId) {
     const keep = {};
     box.querySelectorAll('input, select, textarea').forEach((el) => el.id && (keep[el.id] = el.value));
     box.innerHTML = PANELS[panel]();
+    // MEGA: la misma tarjeta (con la carpeta que estabas viendo) en cada repintado.
+    const megaSlot = box.querySelector('[data-mega-slot]');
+    if (megaSlot) {
+      if (!megaCard) mountMega((megaCard = document.createElement('div')));
+      megaSlot.replaceWith(megaCard);
+    }
     for (const [id, value] of Object.entries(keep)) {
       const el = box.querySelector('#' + id);
       if (el && [...(el.options || [{ value }])].some((o) => o.value === value)) el.value = value;
@@ -632,8 +644,10 @@ export function renderLibrary(root, libraryId) {
     if (jobs.downloads.includes(v.id)) return '<span class="badge b-busy">Por descargar</span>';
     if (v.source.mediaType === 'image') return '<span class="badge b-kind">Foto</span>';
     if (v.source.file) return '<span class="badge b-kind">Video</span>';
-    if (v.source.fetchError) return `<span class="badge b-error" title="${esc(v.source.fetchError)}">No se pudo descargar</span>`;
-    return '<span class="badge b-link">Sin descargar</span>';
+    // Sin archivo: botón para bajar solo este (o volver a intentarlo si falló).
+    const dl = canDownload(v) ? `<button class="dl-one" data-dl-video="${v.id}" title="${v.source.fetchError ? 'Volver a intentar la descarga' : 'Descargar solo este'}">${v.source.fetchError ? 'Reintentar' : 'Descargar'}</button>` : '';
+    if (v.source.fetchError) return `<span class="badge b-error" title="${esc(v.source.fetchError)}">No se pudo descargar</span>${dl}`;
+    return `<span class="badge b-link">Sin descargar</span>${dl}`;
   };
 
   // En una carpeta que te compartieron, lo que añadió otra persona solo lo quita ella o el dueño.
@@ -696,9 +710,9 @@ export function renderLibrary(root, libraryId) {
   // Siempre el último recuadro. Sin data-kind: no se selecciona, ni se arrastra, ni cuenta para el orden.
   const importTile = () => `
     <button class="tile tile-import" data-tile-import title="Importar links, imágenes o archivos">
-      <span class="ti-plus" aria-hidden="true">+</span>
+      <span class="ti-in"><span class="ti-plus" aria-hidden="true">+</span>
       <span>Importar</span>
-      <small>Haz clic o arrastra aquí</small>
+      <small>Haz clic o arrastra aquí</small></span>
     </button>`;
 
   const setView = (v) => {
@@ -746,6 +760,13 @@ export function renderLibrary(root, libraryId) {
     wheelAt = Date.now();
     const i = VIEWS.findIndex(([k]) => k === view) + (e.deltaY > 0 ? 1 : -1);
     if (i >= 0 && i < VIEWS.length) setView(VIEWS[i][0]);
+  }, { passive: false });
+  // La rueda mueve de lado la barra de bibliotecas cuando no caben todas.
+  root.addEventListener('wheel', (e) => {
+    const bar = !e.ctrlKey && e.target.closest('.shelf-bar');
+    if (!bar || bar.scrollWidth <= bar.clientWidth || !e.deltaY) return;
+    e.preventDefault();
+    bar.scrollLeft += e.deltaY;
   }, { passive: false });
 
   let gridTimer = null;
@@ -1042,13 +1063,24 @@ export function renderLibrary(root, libraryId) {
       delete pill.dataset.held;
       return;
     }
-    // Pulsar la pestaña de la biblioteca abierta: se cambia su nombre ahí mismo.
-    if (pill?.classList.contains('on') && !e.target.closest('.tile-rename')) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      renameInline(pill, 'library', pill.dataset.shelfPill);
-    }
   }, true);
+  // Un clic abre; el nombre se cambia con doble clic (pestaña, título de la biblioteca o de la carpeta).
+  const editName = () => {
+    const input = $('#libName');
+    input.readOnly = false;
+    input.focus();
+    input.select();
+  };
+  root.addEventListener('dblclick', (e) => {
+    const pill = e.target.closest?.('[data-shelf-pill]');
+    if (pill?.classList.contains('on') && !e.target.closest('.tile-rename')) return renameInline(pill, 'library', pill.dataset.shelfPill);
+    const shelfNameEl = e.target.closest?.('[data-shelf-name]');
+    if (shelfNameEl) return renameInline(shelfNameEl.closest('.shelf-tab'), 'library', shelfNameEl.dataset.shelfName);
+    if (e.target.id === 'libName') editName();
+  });
+  root.addEventListener('focusout', (e) => {
+    if (e.target.id === 'libName') e.target.readOnly = true;
+  });
   // Las pestañas no se arrastran como links (eso las importaría como un video).
   root.addEventListener('dragstart', (e) => {
     if (e.target.closest?.('[data-shelf-pill]')) e.preventDefault();
@@ -1477,6 +1509,15 @@ export function renderLibrary(root, libraryId) {
 
   root.addEventListener('click', async (e) => {
     const t = e.target;
+    const dlOne = t.closest('[data-dl-video]');
+    if (dlOne) {
+      // Va dentro del enlace del recuadro: descarga sin abrir el video.
+      e.preventDefault();
+      const v = videoById(dlOne.dataset.dlVideo);
+      if (!v) return;
+      if (v.source.fetchError) upsert('videos', { ...v, source: { ...v.source, fetchError: null } });
+      return queueDownload([v.id]);
+    }
     const un = t.closest('[data-unpaste]');
     if (un) return clearPasted(+un.dataset.unpaste);
     if (t.closest('[data-close]')) return ((panel = null), drawPanel());
@@ -1515,17 +1556,12 @@ export function renderLibrary(root, libraryId) {
         await refresh();
         setActiveShelf(l.id);
         // Recién creada: en cuanto se abre, el nombre se escribe directamente.
-        window.addEventListener('hashchange', () => setTimeout(() => document.querySelector(`[data-shelf-name="${l.id}"]`)?.click(), 150), { once: true });
+        window.addEventListener('hashchange', () => setTimeout(() => document.querySelector(`[data-shelf-name="${l.id}"]`)?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), 150), { once: true });
         location.hash = `#/biblioteca/${l.id}`;
       } catch (err) {
         toast(err.message, 'error');
       }
       return;
-    }
-    const shelfNameEl = t.closest('[data-shelf-name]');
-    if (shelfNameEl) {
-      e.preventDefault();
-      return renameInline(shelfNameEl.closest('.shelf-tab'), 'library', shelfNameEl.dataset.shelfName);
     }
     const shelfDel = t.closest('[data-shelf-del]');
     if (shelfDel) {
@@ -1564,11 +1600,7 @@ export function renderLibrary(root, libraryId) {
       const [kind, id] = nameEl.dataset.name.split(':');
       return renameInline(t.closest('.tile'), kind, id);
     }
-    if (t.closest('[data-act="rename"]')) {
-      const input = $('#libName');
-      input.focus();
-      return input.select();
-    }
+    if (t.closest('[data-act="rename"]')) return editName();
     const igName = t.closest('[data-ig-name]');
     if (igName) {
       upsert('libraries', await api.updateLibrary(folder.id, { name: igName.dataset.igName, nameLocked: false }));
@@ -1654,6 +1686,10 @@ export function renderLibrary(root, libraryId) {
       $('#targetNew').focus();
     } else if (act === 'target-create') createTarget();
     else if (act === 'upload') $('#files').click();
+    else if (act === 'mega') {
+      const lib = libraryById($('#target')?.value || here());
+      openMegaPicker(lib?.id || here(), lib ? libraryLabel(lib) : '');
+    }
     else if (act === 'new-lib') createFolder();
     else if (act === 'ig-connect') openInstagram({ view: 'connect' });
     else if (act === 'ig-tuto-off') {

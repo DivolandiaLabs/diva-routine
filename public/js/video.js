@@ -24,6 +24,8 @@ function embedUrl(src) {
   return null;
 }
 
+// Velocidades del video, de muy lenta (para estudiar un paso) a muy rápida.
+const SPEEDS = [0.1, 0.25, 0.33, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
 const NICE_STEPS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 
 export function renderVideo(root, id) {
@@ -52,7 +54,7 @@ export function renderVideo(root, id) {
     <div class="vgrid">
       <section class="vplayer-col">
         <div class="player ${embed ? 'embed' : ''}">
-          ${isVideo ? `<video id="video" controls playsinline preload="auto" src="/media/${esc(v.source.file)}"></video>`
+          ${isVideo ? `<video id="video" controls controlslist="noplaybackrate" playsinline preload="auto" src="/media/${esc(v.source.file)}"></video>`
             : isImage ? `<img id="photo" src="/media/${esc(v.source.file)}" alt="">`
             : embed ? `<iframe src="${esc(embed)}" allowfullscreen loading="lazy" title="Video original"></iframe>`
             : `<div class="ph big ph-${esc(v.source.platform)}"><span>${esc(PLATFORM[v.source.platform] || 'Link')}</span></div>`}
@@ -79,6 +81,8 @@ export function renderVideo(root, id) {
                 <button class="btn small ghost" data-act="zoom-sel">Ajustar al tramo</button>
                 <button class="btn small ghost" data-act="zoom-all">Ver todo</button>
               </span>
+              <label class="tl-speed" title="Velocidad de reproducción">Velocidad
+                <select id="speed" aria-label="Velocidad de reproducción">${SPEEDS.map((x) => `<option value="${x}">${x === 1 ? 'Normal' : `×${String(x).replace('.', ',')}`}</option>`).join('')}</select></label>
               <span class="hint" id="now"></span>
             </div>
             <div class="tl-fields">
@@ -119,8 +123,8 @@ export function renderVideo(root, id) {
             ${modelPicker('promptModel')}
             <small class="hint">Función Premium: gasta créditos. Se aplican con el estilo de viñeta elegido y se guardan con el dibujo.</small>
           </details>
-          ${styleTiles()}
-          <div class="progress" id="progress" hidden><div class="bar"><div id="bar"></div></div><span id="progText"></span></div>` : ''}
+          <div class="progress" id="progress" hidden><div class="bar"><div id="bar"></div></div><span id="progText"></span></div>
+          ${styleTiles()}` : ''}
       </section>
       <section class="vex-col">
         <div class="vex-head">
@@ -133,6 +137,27 @@ export function renderVideo(root, id) {
 
   const $ = (s) => root.querySelector(s);
   const video = $('#video');
+  // Velocidad: se recuerda la última elegida para todos los videos.
+  if (video) {
+    const speed = $('#speed');
+    let rate = 1;
+    try {
+      rate = Number(localStorage.getItem('jr-speed')) || 1;
+    } catch {
+      /* sin almacenamiento: normal */
+    }
+    if (!SPEEDS.includes(rate)) rate = 1;
+    speed.value = String(rate);
+    video.defaultPlaybackRate = video.playbackRate = rate;
+    speed.addEventListener('change', () => {
+      video.defaultPlaybackRate = video.playbackRate = Number(speed.value);
+      try {
+        localStorage.setItem('jr-speed', speed.value);
+      } catch {
+        /* solo esta vez */
+      }
+    });
+  }
   let activeId = null; // ejercicio resaltado
   let busyManual = false;
   let shownOnly = null; // mientras la IA dibuja: los que se ven; el dibujo base no se enseña

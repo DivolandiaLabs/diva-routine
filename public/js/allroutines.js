@@ -65,7 +65,7 @@ export function renderAllRoutines(root) {
     <div class="lib2"><div class="all-rt lib-main">
       <div class="all-bar">
         <h2>Rutinas</h2>
-        <input id="allQ" type="search" placeholder="Buscar dibujos o rutinas…" aria-label="Buscar dibujos o rutinas…">
+        <input id="allQ" type="search" placeholder="Buscar Rutina" aria-label="Buscar Rutina">
         <label class="sorter" title="Ordenar">${SORT_ICON}<select id="allSort" aria-label="Ordenar">${SORTS.map(([k, l]) => `<option value="${k}" ${k === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <div class="views all-modes" role="group" aria-label="Vista">${MODES.map(([k, l]) => `<button class="view-btn" data-mode="${k}" title="${l}" aria-label="${l}">${MODE_ICON[k]}</button>`).join('')}</div>
         <button class="btn primary" id="allPrint">Imprimir / PDF</button>

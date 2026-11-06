@@ -5,6 +5,7 @@
 // Se abre como una ventana emergente (como el menú de Configuración de Claude): un diálogo con
 // un menú lateral de secciones, encima de lo que estuvieras viendo.
 import { api } from './api.js';
+import { mountMega } from './mega.js';
 import { openNet, NET_INFO } from './redes.js';
 import { CLOUDS, NET_ICON, SAVED_HINT, ICON_IG } from './library.js';
 import { esc, toast, sleep, ask, state, emit, modelPicker, styleTiles, chooseAi, ui, shelves, shelfName, libraryById, upsert, queueDownload, canDownload } from './store.js';
@@ -460,6 +461,7 @@ function mountSettings(root, section) {
           <h4>${CLOUDS[key].icon}${CLOUDS[key].name}${on ? '<span class="badge b-auto">conectado</span>' : ''}</h4>
           ${key === 'gdrive'
             ? '<div id="gdriveBox"></div>'
+            : key === 'mega' ? '<div data-mega-slot></div>'
             : `<p class="hint">Conectar la cuenta para sincronizar tus datos y usar su espacio llegará pronto.</p><button class="btn small" disabled>Conectar cuenta</button>`}
         </section>`;
       }).join('')}
@@ -584,6 +586,8 @@ function mountSettings(root, section) {
       drawTheme();
       drawBackup();
       drawDrive();
+      const slot = root.querySelector('[data-mega-slot]');
+      if (slot) mountMega(slot);
     } catch (e) {
       root.innerHTML = shell(`<div class="empty-state"><h2>No se pudieron leer los ajustes</h2><p>${esc(e.message)}</p></div>`);
     }
