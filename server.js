@@ -57,6 +57,7 @@ let PORT = Number(process.env.PORT) || 5177; // en la app de escritorio, otro li
 const DESKTOP = globalThis.jrDesktop || null;
 
 const MIME = {
+  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.flac': 'audio/flac',
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -76,6 +77,8 @@ const MIME = {
 };
 const VIDEO_EXT = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv']);
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
+// Audio: canciones o música para las clases.
+const AUDIO_EXT = new Set(['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.oga', '.opus', '.flac']);
 
 fs.mkdirSync(LOCAL_DIR, { recursive: true });
 // Si la carpeta compartida no está disponible (disco de red apagado, nube sin sincronizar),
@@ -107,7 +110,7 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 
 // ---------- base de datos (JSON en disco) ----------
 
-let db = dataError ? { libraries: [], videos: [], exercises: [], routines: [], routineTabs: [], deleted: {} } : loadDb();
+let db = dataError ? { libraries: [], videos: [], exercises: [], routines: [], routineTabs: [], seqFolders: [], deleted: {} } : loadDb();
 
 // Lee un JSON reintentando unos segundos si está ocupado (al actualizar, la app anterior puede
 // tenerlo abierto todavía, o el antivirus estar escaneando el archivo recién instalado/escrito).
@@ -147,6 +150,7 @@ function loadDb() {
     exercises: [],
     routines: parsed.routines || [],
     routineTabs: parsed.routineTabs || [], // pestañas de grupos en el Creador de rutinas
+    seqFolders: parsed.seqFolders || [], // carpetas de secuencias de ejercicios en el Creador de rutinas
     deleted: parsed.deleted || {}, // id -> cuándo se borró (para sincronizar borrados)
   };
   if (!data.libraries.length) data.libraries.push({ id: newId(), name: 'General', createdAt: now() });
@@ -186,7 +190,7 @@ function loadDb() {
     }
   }
   const ids = new Set(data.exercises.map((e) => e.id));
-  for (const r of data.routines) r.items = r.items.filter((it) => ids.has(it.exerciseId));
+  for (const r of data.routines) r.items = r.items.filter((it) => ids.has(it.exerciseId) || it.snap);
   return data;
 }
 
@@ -195,7 +199,7 @@ function loadDb() {
 // versión de cada elemento es la más nueva y qué se borró. Se calcula solo al guardar,
 // comparando con lo último guardado: así no hay que tocarlo en cada sitio que cambia datos.
 
-const COLLECTIONS = ['libraries', 'videos', 'exercises', 'routines', 'routineTabs'];
+const COLLECTIONS = ['libraries', 'videos', 'exercises', 'routines', 'routineTabs', 'seqFolders'];
 const recordKey = (r) => {
   const { updatedAt, ...rest } = r;
   return JSON.stringify(rest);
@@ -251,7 +255,20 @@ function saveDb() {
 
 // Huella del db.json en disco: si cambia sin haberlo escrito nosotros, lo escribió otro ordenador.
 let diskStamp = null;
-let dataVersion = Date.now(); // cambia al cargar cambios de fuera: los navegadores se ponen al día
+// Cambia al cargar cambios de fuera: los navegadores se ponen al día. En la web se guarda, porque
+// el navegador duerme y despierta este servidor a menudo, y al despertar no hay nada nuevo.
+const VERSION_FILE = path.join(DATA_DIR, 'data-version.txt');
+let dataVersion = 0;
+function bumpData() {
+  dataVersion = Date.now();
+  if (globalThis.jrWeb) fsp.writeFile(VERSION_FILE, String(dataVersion)).catch(() => {});
+}
+try {
+  dataVersion = globalThis.jrWeb ? Number(fs.readFileSync(VERSION_FILE, 'utf8')) || 0 : 0;
+} catch {
+  /* aún no guardada */
+}
+if (!dataVersion) bumpData();
 async function stampOf() {
   try {
     const s = await fsp.stat(DB_FILE);
@@ -273,7 +290,7 @@ async function syncFromDisk() {
     db = loadDb();
     rememberSaved(db);
     diskStamp = st2;
-    dataVersion = Date.now();
+    bumpData();
     console.log('[sincronizar] cargados los cambios de otro ordenador');
   } catch (e) {
     console.error('[sincronizar] no se pudo leer db.json (¿a medio copiar?):', e.message);
@@ -351,7 +368,7 @@ function mergeDb(a, b) {
   for (const l of out.libraries) if (l.parentId && !libIds.has(l.parentId)) l.parentId = null;
   // (Un dibujo puede estar sin su video: los que te comparten llegan sin él.)
   const exIds = new Set(out.exercises.map((e) => e.id));
-  for (const r of out.routines) r.items = (r.items || []).filter((it) => exIds.has(it.exerciseId));
+  for (const r of out.routines) r.items = (r.items || []).filter((it) => exIds.has(it.exerciseId) || it.snap);
   out.routines.sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
   return out;
 }
@@ -364,6 +381,8 @@ function referencedFiles(data) {
     if (v.poster) s.add(v.poster);
   }
   for (const e of data.exercises) for (const k of e.keyframes || []) for (const f of [k.img, k.origImg]) if (f) s.add(f);
+  // Las copias guardadas en las rutinas (de dibujos ya borrados) y sus viñetas añadidas.
+  for (const r of data.routines || []) for (const it of r.items || []) for (const k of [...(it.snap?.keyframes || []), ...(it.extra || [])]) for (const f of [k?.img, k?.origImg]) if (f) s.add(f);
   return s;
 }
 
@@ -372,6 +391,12 @@ function referencedFiles(data) {
  * downloadText, downloadFile, uploadFile, deleteFile }. Si ya hay una vuelta en curso, se hace
  * otra justo después (una sola, aunque se pida varias veces).
  */
+// Versión web (el navegador, p. ej. en el móvil): solo se bajan los datos y las imágenes; los
+// videos se ven directamente desde Drive al abrirlos (ver /media/), sin llenar el aparato.
+const WEB_LAZY = Boolean(globalThis.jrWeb);
+const SMALL_FILE = 5 * 1024 * 1024;
+const remoteFiles = new Map(); // nombre -> { id, size }: lo que hay en Drive (de la última vuelta)
+
 function makeSyncer(tag, P) {
   const st = { state: 'off', last: null, error: null, progress: null };
   let remoteVersion = null; // versión del db.json remoto que ya está juntada aquí
@@ -421,8 +446,24 @@ function makeSyncer(tag, P) {
           db = merged;
           rememberSaved(db);
           await saveDb();
-          dataVersion = Date.now();
+          bumpData();
           console.log(`[${tag}] cambios de otros ordenadores juntados`);
+        }
+      }
+
+      // En la web: quitar los «no se pudo descargar» de videos que ahora se ven desde Drive.
+      if (WEB_LAZY && tag === 'google') {
+        let fixed = false;
+        for (const v of db.videos) {
+          if (!v.source?.fetchError || !streamable(v)) continue;
+          const before = structuredClone(v);
+          delete v.source.fetchError;
+          libraryHistory.acceptAutomatic('videos', before, v, ['source']);
+          fixed = true;
+        }
+        if (fixed) {
+          await saveDb();
+          bumpData();
         }
       }
 
@@ -434,7 +475,11 @@ function makeSyncer(tag, P) {
     const linked = new Set(db.videos.filter(remoteCopy).map((v) => v.source.file));
       const here = (f) => fs.existsSync(path.join(UPLOAD_DIR, f));
       const toUp = [...refs].filter((f) => !linked.has(f) && !files.has(f) && here(f));
-      const toDown = [...refs].filter((f) => files.has(f) && !here(f));
+      if (tag === 'google') {
+        remoteFiles.clear();
+        for (const [name, f] of files) remoteFiles.set(name, f);
+      }
+      const toDown = [...refs].filter((f) => files.has(f) && !here(f) && !(WEB_LAZY && Number(files.get(f).size) > SMALL_FILE));
       const total = toUp.length + toDown.length;
       let done = 0;
       for (const f of toUp) {
@@ -448,7 +493,7 @@ function makeSyncer(tag, P) {
         await P.downloadFile(files.get(f).id, path.join(UPLOAD_DIR, f));
         done++;
       }
-      if (toDown.length) dataVersion = Date.now(); // ya se pueden ver los videos y fotos nuevos
+      if (toDown.length) bumpData(); // ya se pueden ver los videos y fotos nuevos
 
       // 3) Subir los datos si aquí hay algo que Drive no tiene. (Si otro ordenador subió los suyos
       // justo a la vez, en su próxima vuelta junta estos con los suyos: nada se pierde.)
@@ -503,7 +548,7 @@ const collab = createCollab({
   onAutomaticChange: (kind, before, after, fields) => libraryHistory.acceptAutomatic(kind, before, after, fields),
   saveDb,
   markSaved: (r) => savedSnap.set(r.id, recordKey(r)), // llegó de fuera: no es un cambio de aquí
-  onData: () => (dataVersion = Date.now()),
+  onData: bumpData,
 });
 
 /** Video compartido cuyo archivo aún no está aquí: para el navegador, «por descargar» (de Drive). */
@@ -511,7 +556,10 @@ const collab = createCollab({
 // no se sincroniza, y cada ordenador lo baja de allí cuando le falta.
 const fromAccount = (v) => Boolean(v.source?.ref?.auth && v.source.platform === 'cloud');
 const remoteCopy = (v) => Boolean(v.source?.drive || fromAccount(v));
-const forClient = (v) => (remoteCopy(v) && v.source.file && !fs.existsSync(path.join(UPLOAD_DIR, v.source.file))
+// En la web, los que están en tu Google Drive no se bajan: se ven desde allí (ver /media/).
+const driveIdOf = (v) => v.source?.drive || (fromAccount(v) && v.source.ref.cloud !== 'mega' ? v.source.ref.id : null);
+const streamable = (v) => Boolean(globalThis.jrWeb && google.connected() && driveIdOf(v));
+const forClient = (v) => (remoteCopy(v) && v.source.file && !streamable(v) && !fs.existsSync(path.join(UPLOAD_DIR, v.source.file))
   ? { ...v, source: { ...v.source, file: null } }
   : v);
 
@@ -532,11 +580,19 @@ async function fetchShared(v0) {
     }
     throw e;
   }
-  dataVersion = Date.now();
+  bumpData();
 }
 
 if (!dataError) {
-  if (fs.existsSync(DB_FILE)) stampOf().then((s) => (diskStamp = s));
+  if (fs.existsSync(DB_FILE)) {
+    // Ya, antes de la primera petición: si no, al arrancar parecería que otro ordenador lo cambió.
+    try {
+      const s = fs.statSync(DB_FILE);
+      diskStamp = `${s.mtimeMs}:${s.size}`;
+    } catch {
+      stampOf().then((x) => (diskStamp = x));
+    }
+  }
   else saveDb();
   setInterval(() => syncFromDisk().catch(() => {}), 3000);
   beat();
@@ -570,9 +626,46 @@ function detectPlatform(url) {
   if (u.includes('youtube.com') || u.includes('youtu.be')) return 'youtube';
   if (u.includes('tiktok.com')) return 'tiktok';
   if (u.includes('vimeo.com')) return 'vimeo';
+  if (u.includes('open.spotify.com') || u.startsWith('spotify:')) return 'spotify';
   if (social.netOf(u) === 'x') return 'x';
   return 'web';
 }
+
+/**
+ * Lo que Spotify dice de un link sin cuenta (su oEmbed es público): { ok, title }. Las listas
+ * personales (Daily Mix, Daylist, Blend… con id 37i9dQZF1F…) y las privadas dan 404: solo las ve
+ * su dueño, y su reproductor incrustado sale «Page not found». ok: null si no se pudo preguntar.
+ */
+async function spotifyInfo(url) {
+  try {
+    const r = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) });
+    if (r.status === 404 || r.status === 400) return { ok: false, title: null };
+    if (!r.ok) return { ok: null, title: null };
+    const j = await r.json();
+    return { ok: true, title: j.title ? String(j.title).slice(0, 200) : null, duration: await spotifyDuration(url) };
+  } catch {
+    return { ok: null, title: null };
+  }
+}
+
+/**
+ * Cuánto dura, en segundos: una canción, o la suma de las canciones de un álbum o una lista
+ * (de su reproductor incrustado, que es público; trae cada canción con su duración en ms).
+ */
+async function spotifyDuration(url) {
+  const m = String(url).match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(track|album|playlist|episode)\/([A-Za-z0-9]+)/i);
+  if (!m) return null;
+  try {
+    const r = await fetch(`https://open.spotify.com/embed/${m[1].toLowerCase()}/${m[2]}`, { signal: AbortSignal.timeout(10000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!r.ok) return null;
+    const ms = [...(await r.text()).matchAll(/"duration":(\d+)/g)].map((x) => +x[1]).filter((x) => x > 0);
+    if (!ms.length) return null;
+    return Math.round((m[1].toLowerCase() === 'track' || m[1].toLowerCase() === 'episode' ? Math.max(...ms) : ms.reduce((a, b) => a + b, 0)) / 100) / 10;
+  } catch {
+    return null;
+  }
+}
+const spotifyTitle = async (url) => (await spotifyInfo(url)).title;
 
 function titleFromUrl(url) {
   const m = url.match(/instagram\.com\/(?:[^/]+\/)?(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/i);
@@ -668,6 +761,7 @@ async function serveFile(req, res, filePath) {
 
 // Versión de la app = última modificación de los archivos de public/ (para avisar de recargar).
 async function appVersion() {
+  if (process.env.JR_WEB_VERSION) return process.env.JR_WEB_VERSION; // versión web: no hay carpeta public/ en disco
   let latest = 0;
   const walk = async (dir) => {
     for (const ent of await fsp.readdir(dir, { withFileTypes: true })) {
@@ -719,7 +813,7 @@ async function restoreBackup(req) {
     db = loadDb();
     rememberSaved(db);
     diskStamp = await stampOf();
-    dataVersion = Date.now();
+    bumpData();
     return { kept: prev };
   } finally {
     restoring = false;
@@ -731,7 +825,7 @@ async function restoreBackup(req) {
 async function receiveUpload(req) {
   const original = decodeURIComponent(req.headers['x-filename'] || 'archivo');
   const ext = path.extname(original).toLowerCase();
-  if (!VIDEO_EXT.has(ext) && !IMAGE_EXT.has(ext)) throw fail(415, `Formato no soportado: ${ext || '(sin extensión)'}`);
+  if (!VIDEO_EXT.has(ext) && !IMAGE_EXT.has(ext) && !AUDIO_EXT.has(ext)) throw fail(415, `Formato no soportado: ${ext || '(sin extensión)'}`);
   const fileName = newId() + ext;
   const dest = path.join(UPLOAD_DIR, fileName);
   await new Promise((resolve, reject) => {
@@ -741,7 +835,7 @@ async function receiveUpload(req) {
     out.on('error', reject);
     req.on('error', reject);
   });
-  return { file: fileName, original, mediaType: VIDEO_EXT.has(ext) ? 'video' : 'image' };
+  return { file: fileName, original, mediaType: VIDEO_EXT.has(ext) ? 'video' : AUDIO_EXT.has(ext) ? 'audio' : 'image' };
 }
 
 async function removeUpload(fileName) {
@@ -976,7 +1070,7 @@ const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => k in obj).map(
 // poster: imagen de portada (un fotograma), para la Biblioteca.
 const VIDEO_EDITABLE = ['title', 'titleLocked', 'libraryId', 'notes', 'poster', 'pinnedTop'];
 // titleLocked/categoryLocked: editados a mano, el análisis ya no los sustituye.
-const EXERCISE_EDITABLE = ['pinnedTop', 'srcLabel', 'title', 'titleLocked', 'start', 'end', 'mode', 'keyframes', 'technique', 'category', 'categoryLocked', 'notes', 'aiPrompt'];
+const EXERCISE_EDITABLE = ['folderId', 'tabs', 'pinnedTop', 'srcLabel', 'title', 'titleLocked', 'start', 'end', 'mode', 'keyframes', 'technique', 'category', 'categoryLocked', 'notes', 'aiPrompt'];
 // pinned / pinnedIn: la rutina se ve arriba en esas bibliotecas (pinned, de antes: en la principal).
 const ROUTINE_EDITABLE = ['name', 'subtitle', 'items', 'notes', 'pinned', 'pinnedIn', 'tabs', 'pinnedTop', 'tableStyle'];
 
@@ -1035,6 +1129,9 @@ function newExercise(videoId, fields) {
   };
 }
 
+/** Copia de un dibujo para guardarla dentro de una rutina (sin lo que solo sirve en la biblioteca). */
+const snapOf = (e) => ({ title: e.title, category: e.category || '', start: e.start, end: e.end, keyframes: e.keyframes || [], technique: e.technique || { summary: '', tags: [], cues: [] }, notes: e.notes || '' });
+
 // Viñetas (dibujos de cada fase) guardadas en uploads.
 const framesOf = (ex) => (ex.keyframes || []).flatMap((k) => [k.img, k.origImg]).filter(Boolean);
 
@@ -1042,8 +1139,15 @@ function dropExercises(pred) {
   const dropped = db.exercises.filter(pred);
   const gone = new Set(dropped.map((e) => e.id));
   db.exercises = db.exercises.filter((e) => !gone.has(e.id));
-  for (const r of db.routines) r.items = r.items.filter((it) => !gone.has(it.exerciseId));
-  for (const f of dropped.flatMap(framesOf)) holdUpload(f);
+  // Las rutinas no pierden lo que tenían: cada una se queda con su copia del dibujo.
+  for (const r of db.routines) {
+    for (const it of r.items) {
+      const e = gone.has(it.exerciseId) && dropped.find((x) => x.id === it.exerciseId);
+      if (e) it.snap = snapOf(e);
+    }
+  }
+  const kept = referencedFiles(db);
+  for (const f of dropped.flatMap(framesOf)) if (!kept.has(f)) holdUpload(f);
 }
 
 // ---------- ajustes: carpeta de datos ----------
@@ -1183,6 +1287,13 @@ async function handleApi(req, res, parts) {
   const [resource, id, action, sub] = parts;
   const method = req.method;
 
+  // --- Spotify: ¿se puede escuchar este link incrustado? ---
+  if (resource === 'spotify' && id === 'check' && method === 'GET') {
+    const url = new URL(req.url, 'http://x').searchParams.get('url') || '';
+    if (!/^https:\/\/open\.spotify\.com\//i.test(url)) throw fail(400, 'Link de Spotify no válido');
+    return send(res, 200, await spotifyInfo(url));
+  }
+
   // --- ajustes: carpeta de datos (compartida entre ordenadores o la de este) ---
   if (resource === 'backup') {
     if (id === 'info' && method === 'GET') {
@@ -1224,7 +1335,9 @@ async function handleApi(req, res, parts) {
       // Google vuelve a este ordenador (127.0.0.1) con el permiso; ver más abajo, en el servidor.
       // ?drive=1: también el permiso para ver tus carpetas de Drive (Redes → Google Drive).
       const wantDrive = new URL(req.url, 'http://x').searchParams.get('drive') === '1';
-      res.writeHead(302, { Location: google.loginUrl(`http://127.0.0.1:${PORT}/`, { drive: wantDrive }) });
+      // En la versión web, Google vuelve a la propia página de la app.
+      const back = globalThis.jrWeb ? globalThis.jrWeb.origin + globalThis.jrWeb.base : `http://127.0.0.1:${PORT}/`;
+      res.writeHead(302, { Location: google.loginUrl(back, { drive: wantDrive }) });
       return res.end();
     }
     if (id === 'storage' && method === 'GET') return send(res, 200, await google.storage());
@@ -1625,11 +1738,12 @@ async function handleApi(req, res, parts) {
   if (resource === 'libraries') {
     if (!id && method === 'POST') {
       // parentId: carpeta dentro de otra (sin él, va en la Biblioteca).
-      const { name, parentId, shelf } = await readJson(req);
+      const { name, parentId, shelf, kind } = await readJson(req);
       // shelf: una biblioteca más (con sus propias carpetas), no una carpeta.
+      // kind 'class': una carpeta que se reproduce seguida, en su orden, como una lista.
       const lib = shelf
         ? { id: newId(), name: String(name || 'Nueva biblioteca').slice(0, 60), shelf: true, createdAt: now() }
-        : { id: newId(), name: String(name || 'Nueva carpeta').slice(0, 60), parentId: validParent(parentId, null), createdAt: now() };
+        : { id: newId(), name: String(name || (kind === 'class' ? 'Nueva clase' : 'Nueva carpeta')).slice(0, 60), parentId: validParent(parentId, null), createdAt: now(), ...(kind === 'class' ? { kind: 'class' } : {}) };
       db.libraries.push(lib);
       await saveDb();
       return send(res, 201, lib);
@@ -1709,6 +1823,25 @@ async function handleApi(req, res, parts) {
       }
       if (body.nameLocked === false) delete lib.nameLocked; // vuelve a seguir el nombre de la colección
       if ('pinnedTop' in body) body.pinnedTop ? (lib.pinnedTop = true) : delete lib.pinnedTop; // fijada arriba
+      // Clase: cuánto se ve cada cosa. Video: { start, end } en segundos; foto o rutina: { secs }.
+      if (lib.kind === 'class' && body.classItems && typeof body.classItems === 'object') {
+        const num = (x, max) => (Number.isFinite(+x) && +x >= 0 ? Math.min(+x, max) : null);
+        const out = {};
+        for (const [key, v] of Object.entries(body.classItems)) {
+          if (!/^[\w-]{1,40}$/.test(key) || !v || typeof v !== 'object') continue;
+          const item = {};
+          const start = num(v.start, 86400);
+          const end = num(v.end, 86400);
+          const secs = num(v.secs, 3600);
+          const dur = num(v.dur, 86400); // duración de una canción de Spotify, cuando ya se sabe
+          if (start != null) item.start = start;
+          if (dur) item.dur = dur;
+          if (end != null && (start == null || end > start)) item.end = end;
+          if (secs) item.secs = secs;
+          if (Object.keys(item).length) out[key] = item;
+        }
+        lib.classItems = out;
+      }
       await saveDb();
       return send(res, 200, lib);
     }
@@ -1784,7 +1917,8 @@ async function handleApi(req, res, parts) {
           }
           continue;
         }
-        let entries = [{ url: raw, title: null }];
+        const sp = detectPlatform(raw) === 'spotify' ? await spotifyInfo(raw) : null;
+        let entries = [{ url: raw, title: sp?.title || null, duration: sp?.duration || null }];
         if (isPlaylist(raw)) {
           try {
             entries = await expandPlaylist(raw);
@@ -1797,7 +1931,7 @@ async function handleApi(req, res, parts) {
           created.push(
             newVideo(libraryOrRoot(libraryId), {
               title: e.title || titleFromUrl(e.url),
-              source: { kind: 'link', url: e.url, platform: detectPlatform(e.url), file: null, mediaType: null },
+              source: { kind: 'link', url: e.url, platform: detectPlatform(e.url), file: null, mediaType: null, ...(e.duration ? { duration: e.duration } : {}) },
             })
           );
         }
@@ -1810,7 +1944,7 @@ async function handleApi(req, res, parts) {
       const up = await receiveUpload(req);
       const v = newVideo(libraryOrRoot(String(req.headers['x-library'] || '')), {
         title: up.original.replace(/\.[^.]+$/, ''),
-        source: { kind: up.mediaType === 'image' ? 'photo' : 'upload', url: '', platform: 'local', file: up.file, mediaType: up.mediaType },
+        source: { kind: up.mediaType === 'image' ? 'photo' : up.mediaType === 'audio' ? 'audio' : 'upload', url: '', platform: 'local', file: up.file, mediaType: up.mediaType },
       });
       db.videos.push(v);
       await saveDb();
@@ -2006,6 +2140,34 @@ async function handleApi(req, res, parts) {
     }
   }
 
+  // --- carpetas de secuencias (Creador de rutinas) ---
+  if (resource === 'seq-folders') {
+    if (!id && method === 'POST') {
+      const name = String((await readJson(req)).name || '').trim().slice(0, 60);
+      if (!name) throw fail(400, 'Ponle un nombre a la carpeta.');
+      const folder = { id: newId(), name, createdAt: now(), updatedAt: now() };
+      (db.seqFolders ||= []).push(folder);
+      await saveDb();
+      return send(res, 201, folder);
+    }
+    const folder = find('seqFolders', id, 'Carpeta');
+    if (method === 'PUT') {
+      const name = String((await readJson(req)).name || '').trim().slice(0, 60);
+      if (!name) throw fail(400, 'Ponle un nombre a la carpeta.');
+      folder.name = name;
+      folder.updatedAt = now();
+      await saveDb();
+      return send(res, 200, folder);
+    }
+    if (method === 'DELETE') {
+      // Las secuencias de dentro no se borran: vuelven fuera de la carpeta.
+      db.seqFolders = db.seqFolders.filter((x) => x !== folder);
+      for (const e of db.exercises) if (e.folderId === id) delete e.folderId;
+      await saveDb();
+      return send(res, 200, { ok: true });
+    }
+  }
+
   // --- rutinas ---
   // Pestañas de rutinas: con libraryId muestran lo anclado a esa biblioteca; sin él, su propio grupo.
   if (resource === 'routine-tabs') {
@@ -2038,7 +2200,7 @@ async function handleApi(req, res, parts) {
     }
     if (method === 'DELETE') {
       db.routineTabs = db.routineTabs.filter((x) => x !== tab);
-      for (const r of db.routines) if (r.tabs?.includes(id)) r.tabs = r.tabs.filter((x) => x !== id);
+      for (const r of [...db.routines, ...db.exercises]) if (r.tabs?.includes(id)) r.tabs = r.tabs.filter((x) => x !== id);
       await saveDb();
       return send(res, 200, { ok: true });
     }
@@ -2104,7 +2266,7 @@ const server = http.createServer(async (req, res) => {
           <div style="max-width:420px;text-align:center"><h2>${gsync.error ? 'No se pudo iniciar sesión' : 'Sesión iniciada'}</h2>
           <p>${gsync.error ? gsync.error.replace(/[<>&]/g, '') : 'Ya puedes cerrar esta pestaña y volver a Diva Routine.'}</p></div></body>`);
       }
-      res.writeHead(302, { Location: `http://localhost:${PORT}/#/ajustes` });
+      res.writeHead(302, { Location: globalThis.jrWeb ? `${globalThis.jrWeb.base}#/ajustes` : `http://localhost:${PORT}/#/ajustes` });
       return res.end();
     }
 
@@ -2130,7 +2292,37 @@ const server = http.createServer(async (req, res) => {
     }
     if (pathname.startsWith('/media/')) {
       const p = safeJoin(UPLOAD_DIR, pathname.slice(7));
-      return p ? await serveFile(req, res, p) : send(res, 400, 'Ruta inválida');
+      if (!p) return send(res, 400, 'Ruta inválida');
+      // En la web, un video que no está en este aparato: directamente desde tu Drive, a trozos.
+      const name = path.basename(p);
+      const remoteId = WEB_LAZY && !fs.existsSync(p) && google.connected()
+        && (remoteFiles.get(name)?.id || driveIdOf(db.videos.find((v) => v.source?.file === name) || {}));
+      if (remoteId) {
+        // Se piden siempre bytes concretos y las cabeceras se calculan aquí: el navegador no deja
+        // leer Content-Range de Drive, y sin ella el reproductor no avanza.
+        const size = await google.driveSize(remoteId);
+        const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
+        let start = m?.[1] ? Number(m[1]) : 0;
+        let end = m?.[2] ? Number(m[2]) : size - 1;
+        if (m && !m[1] && m[2]) [start, end] = [size - Number(m[2]), size - 1];
+        end = Math.min(end, size - 1);
+        if (size && (start >= size || start > end)) {
+          res.writeHead(416, { 'Content-Range': `bytes */${size}` });
+          return res.end();
+        }
+        const h = { 'Content-Type': MIME[path.extname(p).toLowerCase()] || 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=3600' };
+        let r;
+        if (!size) {
+          r = await google.driveMedia(remoteId);
+          res.writeHead(200, h);
+        } else {
+          r = await google.driveMedia(remoteId, `bytes=${start}-${end}`);
+          Object.assign(h, { 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${size}` });
+          res.writeHead(m ? 206 : 200, m ? h : { ...h, 'Content-Range': undefined, 'Content-Length': size });
+        }
+        return res.endBlob ? res.endBlob(r.body) : res.end(Buffer.from(await r.arrayBuffer()));
+      }
+      return await serveFile(req, res, p);
     }
     const p = safeJoin(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname.slice(1));
     return p ? await serveFile(req, res, p) : send(res, 400, 'Ruta inválida');

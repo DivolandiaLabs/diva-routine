@@ -18,6 +18,8 @@ database_id = "29c69b2c-0140-4ae3-ad4a-34c644fcab34"
 
 # Datos de Lemon Squeezy (no son secretos). Cambian al pasar de modo de prueba a real.
 [vars]
+# Cliente OAuth «Aplicación web» (versión web). Su secreto: `npx wrangler secret put GOOGLE_WEB_SECRET`.
+GOOGLE_WEB_CLIENT_ID = "37274077528-8lifmi4fsvsbotlh01dp511c872f5e3t.apps.googleusercontent.com"
 STORE_ID = "PENDIENTE"
 PRODUCT_ID = "PENDIENTE"
 VARIANT_WEEK = "PENDIENTE"

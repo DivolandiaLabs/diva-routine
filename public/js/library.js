@@ -3,6 +3,7 @@
 // Cada opción abre su panel entre la cuadrícula y el menú.
 import { api as baseApi, createApi } from './api.js';
 import { mountMega, openMegaPicker } from './mega.js';
+import { isClass, classItems, itemType, playable, totalSecs, itemSecs, clock, chipText, openSegment, openSecs, rememberDuration } from './classtime.js';
 const historyOwner = (() => {
   try {
     const id = sessionStorage.getItem('jr-library-undo') || crypto.randomUUID();
@@ -13,13 +14,13 @@ const historyOwner = (() => {
 const api = createApi({ 'X-Library-Undo': historyOwner });
 const actionApi = () => createApi({ 'X-Library-Undo': historyOwner, 'X-Library-Undo-Group': crypto.randomUUID() });
 import {
-  state, refresh, emit, esc, toast, upsert, libraryById, videoById, exerciseById, videosOf, exercisesOf, videoThumb, PLATFORM,
+  state, refresh, emit, esc, toast, upsert, libraryById, videoById, exerciseById, itemExercise, videosOf, exercisesOf, videoThumb, PLATFORM,
   jobs, queueDownload, isAnalyzing, canDownload, syncInstagram, linkedLibraries,
   selection, toggleSelected, selectedIndex, selectedVideos, extractSelection, ui, exerciseFigure, pinRoutines,
   removeVideos, removeLibraries, rootLibrary, folders, topParent, isTop, shelves, shelfName, shelfOf, activeShelf, setActiveShelf, libraryLabel, libraryChoices, needsExtraction, fmtTime,
   childFolders, folderPath, videosDeep, descendantIds, moveVideos, moveFolder,
   spaceFor, sharedFolderOf, addedByOther, who, sharedLabel,
-  ask, isPinnedIn, routineById,
+  ask, isPinnedIn, routineById, pinnedShelves, isAudio,
 } from './store.js';
 import { openInstagram } from './instagram.js';
 import { openNet, NET_INFO } from './redes.js';
@@ -48,6 +49,9 @@ const ICON = {
   upload: svg('<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'),
   folder: svg(FOLDER),
   newFolder: svg(FOLDER + '<path d="M12 10.5v6M9 13.5h6"/>'),
+  // Clase: una carpeta que se reproduce seguida, como una lista.
+  newClass: svg('<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z" fill="currentColor"/><path d="M3 9h3M3 15h3"/>'),
+  classIcon: svg('<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z" fill="currentColor"/><path d="M3 9h3M3 15h3"/>'),
   instagram: svg('<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="0.8" fill="currentColor"/>'),
   selectAll: svg('<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/>'),
   draw: svg('<path d="M4 20l4-1 11-11a2.1 2.1 0 0 0-3-3L5 16z"/><path d="M14 7l3 3"/>'),
@@ -73,6 +77,8 @@ const HIDE_ICON = {
   routine: svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>'),
   image: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/>'),
   folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  audio: svg('<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>'),
+  class: svg('<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z" fill="currentColor"/><path d="M3 9h3M3 15h3"/>'),
 };
 
 export const NET_ICON = {
@@ -80,7 +86,16 @@ export const NET_ICON = {
   tiktok: svg('<path d="M14 4v10.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M14 4c.5 2.5 2.3 4 5 4"/>'),
   facebook: svg('<path d="M14 8h3V4.5h-3a4 4 0 0 0-4 4V11H7.5v3.5H10V21h3.5v-6.5H17l.5-3.5h-4V9a1 1 0 0 1 1-1z"/>'),
   x: svg('<path d="M5 4l14 16M19 4 5 20"/>'),
+  spotify: svg('<circle cx="12" cy="12" r="9"/><path d="M7.5 9.5c3-1 6.5-.7 9 .8M8 12.6c2.5-.7 5.3-.4 7.3.8M8.6 15.5c2-.5 4-.3 5.6.6"/>'),
 };
+
+/** Tarjeta de Spotify en Redes sociales: iniciar sesión dentro de la app para oír canciones enteras. */
+export const SPOTIFY_LOGIN = 'https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F';
+export const spotifyCard = () => `<section class="net-card" style="--net:#1ed760">
+  <h4>${NET_ICON.spotify}Spotify</h4>
+  <p class="hint">Inicia sesión para que las canciones y listas suenen enteras (sin sesión, Spotify solo deja muestras de 30 s y pone un cartel encima). Se abre una ventana de Spotify; al terminar, ciérrala.</p>
+  <a class="btn small primary" href="${SPOTIFY_LOGIN}" target="_blank" rel="noopener">Iniciar sesión en Spotify</a>
+</section>`;
 
 export const SAVED_HINT = {
   gdrive: 'Tus carpetas de Google Drive, con sus videos y fotos.',
@@ -116,7 +131,7 @@ export function renderLibrary(root, libraryId) {
       <a class="shelf-pill${l.id === shelf.id ? ' on' : ''}${shelfShared(l) ? ' shared' : ''}" href="#/biblioteca/${l.id}" data-drop-lib="${l.id}" data-shelf-pill="${l.id}" draggable="false" title="${l.id === shelf.id ? 'Doble clic para cambiar el nombre · mantén pulsado para moverla' : `Abrir «${esc(shelfName(l))}» (suelta aquí para llevar algo a ella)`}">${esc(shelfName(l))}</a>`).join('')}
       <button class="shelf-add" data-shelf-add title="Nueva biblioteca" aria-label="Nueva biblioteca">+</button>
     </nav>`;
-  const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Doble clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${`<button class="shelf-share" data-share-folder="${shelf.id}" title="Compartir esta biblioteca entera" aria-label="Compartir la biblioteca ${esc(shelfName(shelf))}">${SHARE_TAG}${shelfShared(shelf) ? `<span>${spaceFor('folder', shelf.id).members.length}</span>` : ''}</button>`}${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
+  const shelfTitle = () => `<h2 class="shelf-tab on" data-drop-lib="${shelf.id}"><span class="shelf-name" data-shelf-name="${shelf.id}" title="Doble clic para cambiar el nombre">${esc(shelfName(shelf))}</span>${`<button class="shelf-share${shelfShared(shelf) ? ' on' : ''}" data-share-folder="${shelf.id}" title="Compartir esta biblioteca entera" aria-label="Compartir la biblioteca ${esc(shelfName(shelf))}">${SHARE_TAG}${shelfShared(shelf) ? `<span>${spaceFor('folder', shelf.id).members.length}</span>` : ''}</button>`}${shelf.root ? '' : `<button class="shelf-del" data-shelf-del="${shelf.id}" title="Borrar esta biblioteca" aria-label="Borrar la biblioteca ${esc(shelfName(shelf))}">✕</button>`}</h2>`;
   // Vistas como en el explorador de archivos (se recuerda la elegida). Ctrl + rueda cambia de una a otra.
   // Cómo se ordena lo de cada carpeta: el orden propio (arrastrando) o por fecha, nombre o tipo.
   let sortBy = 'custom';
@@ -199,6 +214,8 @@ export function renderLibrary(root, libraryId) {
     if (rect.top < barBottom || rect.bottom > innerHeight) smoothScrollBy(rect.top - barBottom - 10);
   };
 
+  // Dentro de una clase (o de algo que cuelga de ella) no se crean más clases.
+  const inClass = () => { for (let l = folder, i = 0; l && i < 50; l = libraryById(l.parentId), i++) if (isClass(l)) return true; return false; };
   root.innerHTML = `
     <div class="lib2">
       <section class="lib-main" id="main">
@@ -209,20 +226,25 @@ export function renderLibrary(root, libraryId) {
             ? `<a href="#/biblioteca/${shelf.id}" data-drop-lib="${shelf.id}" title="Suelta aquí para sacar a «${esc(shelfName(shelf))}»">${esc(shelfName(shelf))}</a><span>›</span>
                ${folderPath(folder).slice(0, -1).map((a) => `<a href="#/biblioteca/${a.id}" data-drop-lib="${a.id}" title="Suelta aquí para mover a «${esc(a.name)}»">${esc(a.name)}</a><span>›</span>`).join('')}
                <input id="libName" class="title-input" value="${esc(folder.name)}" aria-label="Nombre de la carpeta" title="Doble clic para cambiar el nombre" readonly>
-               <button class="icon-btn" data-act="rename" title="Cambiar el nombre de la carpeta" aria-label="Cambiar el nombre">${PENCIL}</button>`
+               <button class="icon-btn" data-act="rename" title="Cambiar el nombre de la carpeta" aria-label="Cambiar el nombre">${PENCIL}</button><span id="folderShare"></span>`
             : shelfTitle()}</nav>
           <input id="q" type="search" placeholder="Buscar en todo…" aria-label="Buscar">
+          <button class="mob-btn" id="qBtn" title="Buscar" aria-label="Buscar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
+          <button class="mob-btn" id="toolsBtn" title="Orden, vista y filtros" aria-label="Orden, vista y filtros" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></button>
           <div class="lib-tools">
             <button class="pin-jump" id="pinJump" data-pin-jump hidden title="Ir a lo anclado" aria-label="Ir a lo anclado">${PIN}<b></b></button>
+            <span class="mob-head">Ordenar</span>
             <label class="sorter" title="Ordenar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/></svg>
               <select id="sortBy" aria-label="Ordenar">${SORTS.map(([k, label]) => `<option value="${k}" ${k === sortBy ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+            <span class="mob-head">Vista</span>
             <div class="views" id="views" role="group" aria-label="Vista">${VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('')}</div>
-            <div class="hide-chips" id="hideChips" role="group" aria-label="Mostrar u ocultar">${[['video', 'Video'], ['routine', 'Rutina'], ['image', 'Foto'], ['folder', 'Carpeta']].map(([k, label]) => `<button class="hide-chip" data-hide="${k}" title="${label}" aria-label="${label}">${HIDE_ICON[k]}</button>`).join('')}</div>
+            <span class="mob-head">Mostrar</span>
+            <div class="hide-chips" id="hideChips" role="group" aria-label="Mostrar u ocultar">${[['video', 'Video'], ['routine', 'Rutina'], ['image', 'Foto'], ['audio', 'Audio'], ['folder', 'Carpeta'], ...(inClass() ? [] : [['class', 'Clase']])].map(([k, label]) => `<button class="hide-chip" data-hide="${k}" title="${label}" aria-label="${label}">${HIDE_ICON[k]}</button>`).join('')}</div>
           </div>
         </header>
         </div>
         <div class="ig-callout" id="igTuto" hidden></div>
-        <div class="ig-linked share-bar" id="shareBar" hidden></div>
+        <div class="class-bar" id="classBar" hidden></div>
         <div class="ig-linked" id="igLinked" hidden></div>
         <div class="tiles" id="grid"></div>
         <p class="count lib-count" id="count"></p>
@@ -231,7 +253,7 @@ export function renderLibrary(root, libraryId) {
       <aside class="panel" id="panel" hidden></aside>
       <nav class="opts" id="opts" aria-label="Opciones"></nav>
     </div>
-    <input type="file" id="files" accept="video/*,image/*,.txt" multiple hidden>`;
+    <input type="file" id="files" accept="video/*,image/*,audio/*,.txt" multiple hidden>`;
 
   const $ = (s) => root.querySelector(s);
 
@@ -292,13 +314,13 @@ export function renderLibrary(root, libraryId) {
       item('import', 'Importar', { title: 'Pegar links o imágenes' }),
       item('upload', 'Subir', { title: 'Subir videos o fotos del ordenador' }),
       item('newFolder', 'Carpeta', { title: 'Carpeta nueva' }),
+      inClass() ? '' : item('newClass', 'Clase', { title: 'Clase nueva: lo que pongas dentro se reproduce seguido, en su orden' }),
       item('share', 'Compartir', {
         disabled: !target,
         title: target ? `Compartir «${libraryById(target)?.name}» con otras personas (pueden añadir cosas)` : 'Entra en una carpeta (o selecciona una) para compartirla con otras personas',
       }),
       '<span class="opt-sep"></span>',
       item('selectAll', 'Todo', { title: 'Seleccionar o quitar todo lo que se ve' }),
-      item('draw', 'Dibujos', { badge: n, ready: n > 0 && panel !== 'draw', title: 'Sacar los dibujos de lo seleccionado (van a Rutinas)' }),
       item('move', 'Mover', { badge: n, disabled: !n, title: 'Mover lo seleccionado a otra carpeta' }),
       item('copy', 'Copiar', { badge: n, disabled: !n, title: 'Copiar lo seleccionado en otra carpeta' }),
       item('trash', 'Borrar', { badge: n, disabled: !n, danger: true, title: 'Borrar lo seleccionado' }),
@@ -390,7 +412,7 @@ export function renderLibrary(root, libraryId) {
 
   const connectDrive = async (btn) => {
     if (!state.google?.connected) return toast('Primero inicia sesión con tu cuenta de Google (Ajustes).', 'error');
-    window.open('/api/google/login?drive=1', '_blank');
+    globalThis.JR_WEB ? location.assign('api/google/login?drive=1') : window.open('/api/google/login?drive=1', '_blank');
     btn.disabled = true;
     btn.textContent = 'Esperando el permiso en el navegador…';
     for (let i = 0; i < 150; i++) {
@@ -483,7 +505,7 @@ export function renderLibrary(root, libraryId) {
   const PANELS = {
     import: () => `
       ${panelHead('Importar')}
-      <textarea id="links" rows="6" placeholder="Pega aquí links de YouTube, Instagram, TikTok, Google Drive, Dropbox, OneDrive o MEGA (un archivo o una carpeta), una lista de reproducción… o una imagen (clic derecho → Pegar, o Ctrl+V)"></textarea>
+      <textarea id="links" rows="6" placeholder="Pega aquí links de YouTube, Instagram, TikTok, Spotify, Google Drive, Dropbox, OneDrive o MEGA (un archivo o una carpeta), una lista de reproducción… o una imagen (clic derecho → Pegar, o Ctrl+V). También puedes arrastrar a la cuadrícula videos, fotos, audio o un .txt con links."></textarea>
       <p class="hint" id="linkCount"></p>
       <div class="paste-thumbs" id="pasteThumbs"></div>
       <details class="imp-more">
@@ -498,10 +520,11 @@ export function renderLibrary(root, libraryId) {
         <button class="btn primary" data-act="import">Importar</button>
         <button class="btn" data-act="upload">Subir archivos…</button>
         <button class="btn" data-act="mega" title="Elegir carpetas y archivos de tu cuenta de MEGA">${CLOUDS.mega.icon} MEGA…</button>
+        <button class="btn" data-act="add-routines" title="Poner aquí rutinas que ya has creado">${ICON.routine} Rutinas…</button>
         <button class="btn" data-act="target-new" title="Crear una carpeta dentro de la elegida">+ Carpeta</button>
       </div>
       <div class="row link-add" id="targetNewRow" hidden><input id="targetNew" placeholder="Nombre de la carpeta" aria-label="Nombre de la carpeta"><button class="btn primary" data-act="target-create">Crear</button></div>
-      <p class="hint">También puedes arrastrar a la cuadrícula videos, fotos o un .txt con links.${state.ytdlp ? '' : ' Para descargar de YouTube instala <code>yt-dlp</code>.'}</p>`,
+      ${state.ytdlp ? '' : '<p class="hint">Para descargar de YouTube instala <code>yt-dlp</code>.</p>'}`,
 
     newFolder: () => `
       ${panelHead(folder ? 'Subcarpeta nueva' : 'Carpeta nueva')}
@@ -509,10 +532,18 @@ export function renderLibrary(root, libraryId) {
       <input id="newLib" placeholder="Nombre de la carpeta" aria-label="Nombre de la carpeta">
       <div class="row"><button class="btn primary" data-act="new-lib">Crear carpeta</button></div>`,
 
+    newClass: () => `
+      ${panelHead('Clase nueva')}
+      <p class="hint">Una clase es como una carpeta que se reproduce seguida: los videos (o el tramo que elijas), las fotos y las rutinas, en el orden en que los coloques. Se crea en «${esc(folder ? folder.name : shelfName(shelf))}».</p>
+      <input id="newClassName" placeholder="Nombre de la clase" aria-label="Nombre de la clase">
+      ${classPickList()}
+      <div class="row"><button class="btn primary" data-act="new-class">Crear clase</button></div>`,
+
     // Redes sociales: sin conectar, un solo botón «Conectar cuenta» (abre el tutorial); conectada,
     // un desplegable con lo que tienes guardado en esa red para marcarlo e importarlo.
     instagram: () => `${panelHead('Redes sociales')}
-      ${['instagram', 'youtube', 'tiktok', 'facebook', 'x'].map(netCard).join('')}`,
+      ${['instagram', 'youtube', 'tiktok', 'facebook', 'x'].map(netCard).join('')}
+      ${spotifyCard()}`,
 
     cloud: () => `${panelHead('Nube')}
       ${netCard('gdrive')}
@@ -564,9 +595,9 @@ export function renderLibrary(root, libraryId) {
       <div class="row"><button class="btn primary" data-act="${act}" ${n ? '' : 'disabled'}>${title}</button></div>`;
   }
 
-  // Importar es una ventana: un clic fuera la cierra.
+  // Importar y Clase nueva son ventanas: un clic fuera las cierra.
   root.addEventListener('mousedown', (e) => {
-    if (panel !== 'import' || e.target.closest('#panel, [data-tile-import], [data-menu="import"]')) return;
+    if (!['import', 'newClass'].includes(panel) || e.target.closest('#panel, [data-tile-import], [data-menu="import"], [data-menu="newClass"]')) return;
     panel = null;
     drawPanel();
   });
@@ -575,7 +606,7 @@ export function renderLibrary(root, libraryId) {
   const drawPanel = () => {
     const box = $('#panel');
     box.hidden = !PANELS[panel];
-    box.classList.toggle('popup', panel === 'import');
+    box.classList.toggle('popup', panel === 'import' || panel === 'newClass');
     if (box.hidden) return drawMenu();
     // Al repintar se conserva lo que ya estaba escrito o elegido.
     const keep = {};
@@ -615,6 +646,18 @@ export function renderLibrary(root, libraryId) {
 
   const videoText = (v) => [v.title, v.source.url, ...exercisesOf(v.id).flatMap((e) => [e.title, e.category, ...(e.technique?.tags || [])])].join(' ').toLowerCase();
 
+  // Lo de aquí que puede entrar ya en la clase nueva al crearla (plegado: se abre si se quiere).
+  const classPickList = () => {
+    const vids = videosOf(here());
+    const rts = !folder ? state.routines.filter((r) => isPinnedIn(r, shelf.id)) : [];
+    if (!vids.length && !rts.length) return '';
+    const row = (kind, id, name, tag) => `<label><input type="checkbox" data-cls-pick="${kind}:${id}"><span class="rp-t">${esc(name)}</span><span class="rp-s">${tag}</span></label>`;
+    return `<details class="ai-box cls-pick"><summary>Elegir lo que entra en la clase <small>(opcional)</small></summary>
+      <div class="rp-pick-list">${rts.map((r) => row('routine', r.id, r.name, 'Rutina')).join('')}${vids.map((v) => row('video', v.id, v.title, isAudio(v) ? 'Audio' : v.source.mediaType === 'image' ? 'Foto' : 'Video')).join('')}</div></details>`;
+  };
+
+  // Las rutinas se ven en la biblioteca y dentro de una clase (cada sitio con su propio orden).
+  const place = () => (folder ? folder.id : shelf.id);
   const visible = () => {
     const q = filters.q.trim().toLowerCase();
     if (q) return { libs: folders().filter((l) => l.name.toLowerCase().includes(q)), vids: state.videos.filter((v) => videoText(v).includes(q)) };
@@ -624,7 +667,7 @@ export function renderLibrary(root, libraryId) {
   // los hayas colocado (lo que nunca se colocó: las carpetas antes y luego por fecha).
   const arranged = () => {
     const { libs, vids } = visible();
-    const rts = !folder && !filters.q.trim() ? sortList(state.routines.filter((r) => isPinnedIn(r, shelf.id))) : [];
+    const rts = !filters.q.trim() ? sortList(state.routines.filter((r) => isPinnedIn(r, place()))) : [];
     const items = [
       ...libs.map((x) => ({ kind: 'library', x })),
       ...rts.map((x) => ({ kind: 'routine', x })),
@@ -633,7 +676,7 @@ export function renderLibrary(root, libraryId) {
     if (sortBy !== 'custom' || filters.q.trim()) return items;
     const KIND_RANK = { library: 0, routine: 1, video: 2 };
     // Una rutina recién anclada (aún sin colocar) sale al principio; lo demás sin colocar, al final.
-    const rank = (it) => (it.kind === 'routine' ? it.x.orderIn?.[shelf.id] ?? -1 : it.x.order ?? Infinity);
+    const rank = (it) => (it.kind === 'routine' ? it.x.orderIn?.[place()] ?? -1 : it.x.order ?? Infinity);
     return items.sort((a, b) => rank(a) - rank(b) || KIND_RANK[a.kind] - KIND_RANK[b.kind] || String(a.x.createdAt).localeCompare(String(b.x.createdAt)));
   };
 
@@ -643,6 +686,8 @@ export function renderLibrary(root, libraryId) {
     if (jobs.downloading === v.id) return '<span class="badge b-busy">Descargando…</span>';
     if (jobs.downloads.includes(v.id)) return '<span class="badge b-busy">Por descargar</span>';
     if (v.source.mediaType === 'image') return '<span class="badge b-kind">Foto</span>';
+    if (v.source.platform === 'spotify') return '<span class="badge b-kind b-spotify">Spotify</span>';
+    if (v.source.mediaType === 'audio') return '<span class="badge b-kind">Audio</span>';
     if (v.source.file) return '<span class="badge b-kind">Video</span>';
     // Sin archivo: botón para bajar solo este (o volver a intentarlo si falló).
     const dl = canDownload(v) ? `<button class="dl-one" data-dl-video="${v.id}" title="${v.source.fetchError ? 'Volver a intentar la descarga' : 'Descargar solo este'}">${v.source.fetchError ? 'Reintentar' : 'Descargar'}</button>` : '';
@@ -664,39 +709,129 @@ export function renderLibrary(root, libraryId) {
     const sp = spaceFor('folder', l.id);
     const received = sp && !sp.mine;
     return `
-      <article class="tile tile-folder" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="false" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
+      <article class="tile tile-folder${isClass(l) ? ' tile-class' : ''}" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="false" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
         <label class="sel" title="Seleccionar toda la carpeta para una rutina"><input type="checkbox" data-sel-lib="${l.id}"><b class="order"></b></label>
         <button class="card-pin${l.pinnedTop ? ' on' : ''}" data-pin-lib="${l.id}" title="${l.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${l.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(l.name)}" aria-pressed="${Boolean(l.pinnedTop)}">${PIN}</button>
         ${lockedIn(l, l.parentId) ? '' : `<button class="card-del" data-del-lib="${l.id}" title="${received ? 'Salir de esta carpeta compartida' : 'Borrar la carpeta y todo lo que tiene'}" aria-label="${received ? 'Salir de' : 'Borrar'} la carpeta ${esc(l.name)}">✕</button>`}
         <a class="tile-thumb" href="#/biblioteca/${l.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((v) => `<span>${videoThumb(v)}</span>`).join('')}</span>`
-          : `<span class="folder-empty">${ICON.folder}</span>`}</a>
+          : `<span class="folder-empty">${isClass(l) ? ICON.classIcon : ICON.folder}</span>`}</a>
         <a class="tile-body" href="#/biblioteca/${l.id}">
-          <h3>${ICON.folder}<span class="name-edit" data-name="library:${l.id}" title="Haz clic para cambiar el nombre">${esc(l.name)}</span></h3>
+          <h3>${isClass(l) ? ICON.classIcon : ICON.folder}<span class="name-edit" data-name="library:${l.id}" title="Haz clic para cambiar el nombre">${esc(l.name)}</span></h3>
           <div class="meta">${subs ? `<span>${subs} carpeta${subs === 1 ? '' : 's'}</span>` : ''}<span>${vids.length} elemento${vids.length === 1 ? '' : 's'}</span>${l.igCollections?.length ? '<i class="ig-tag" title="Sincronizada con Instagram">IG</i>' : ''}${sp && (sp.members.length > 1 || !sp.mine) ? `<i class="share-tag" title="Carpeta colaborativa · ${esc(sharedLabel(sp))}">${SHARE_TAG}${sp.members.length}</i>` : byTag(l)}</div>
         </a>
       </article>`;
   };
 
+  // ---------- audio en el recuadro: play, barra, tiempo, volumen y velocidad ----------
+  // Un solo reproductor para toda la vista: al dar play en otro, el anterior se para.
+  const audioFile = (v) => v.source.mediaType === 'audio' && Boolean(v.source.file);
+  // Iconos dibujados (no letras): el triángulo con su centro óptico en el centro del círculo.
+  const AUD_ICON = {
+    play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.2v11.6L18.2 12z" fill="currentColor"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 6h3v12h-3zM13.5 6h3v12h-3z" fill="currentColor"/></svg>',
+  };
+  const AUDIO_SPEEDS = [0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
+  const player = new Audio();
+  let playingId = null;
+  try {
+    player.volume = Math.min(1, Math.max(0, Number(localStorage.getItem('jr-audio-vol') ?? 1)));
+  } catch {
+    /* volumen por defecto */
+  }
+  const audioPlayer = (v) => `
+      <div class="tile-thumb aud" data-aud="${v.id}">
+        <span class="aud-note" aria-hidden="true">♪</span>
+        <button class="aud-play" data-aud-play="${v.id}" title="Reproducir" aria-label="Reproducir ${esc(v.title)}">${AUD_ICON.play}</button>
+        <div class="aud-ctl">
+          <input type="range" class="aud-seek" data-aud-seek min="0" max="1000" value="0" aria-label="Posición">
+          <div class="aud-row">
+            <span class="aud-time" data-aud-time>0:00</span>
+            <label class="aud-vol" title="Volumen">🔊<input type="range" data-aud-vol min="0" max="100" value="${Math.round(player.volume * 100)}" aria-label="Volumen"></label>
+            <select data-aud-rate title="Velocidad" aria-label="Velocidad">${AUDIO_SPEEDS.map((x) => `<option value="${x}" ${x === 1 ? 'selected' : ''}>${x === 1 ? '1×' : `${String(x).replace('.', ',')}×`}</option>`).join('')}</select>
+          </div>
+        </div>
+      </div>`;
+  const clockOf = (t) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00');
+  const audioBox = () => playingId && root.querySelector(`[data-aud="${playingId}"]`);
+  const drawAudio = () => {
+    root.querySelectorAll('[data-aud]').forEach((box) => {
+      const on = box.dataset.aud === playingId;
+      const btn = box.querySelector('[data-aud-play]');
+      const icon = on && !player.paused ? 'pause' : 'play';
+      if (btn.dataset.icon !== icon) (btn.innerHTML = AUD_ICON[icon]), (btn.dataset.icon = icon);
+      btn.title = on && !player.paused ? 'Pausa' : 'Reproducir';
+      box.classList.toggle('playing', on && !player.paused);
+      if (!on) return;
+      const dur = player.duration;
+      if (document.activeElement !== box.querySelector('[data-aud-seek]')) box.querySelector('[data-aud-seek]').value = dur ? Math.round((player.currentTime / dur) * 1000) : 0;
+      box.querySelector('[data-aud-time]').textContent = `${clockOf(player.currentTime)} / ${clockOf(dur)}`;
+      box.querySelector('[data-aud-rate]').value = String(player.playbackRate);
+    });
+  };
+  ['timeupdate', 'play', 'pause', 'ended', 'loadedmetadata', 'ratechange'].forEach((ev) => player.addEventListener(ev, drawAudio));
+  const startAudio = (id) => {
+    const v = videoById(id);
+    if (!v) return;
+    if (playingId !== id) {
+      playingId = id;
+      player.src = `/media/${encodeURIComponent(v.source.file)}`;
+      player.playbackRate = Number(root.querySelector(`[data-aud="${id}"] [data-aud-rate]`)?.value || 1);
+    }
+    if (player.paused) player.play().catch((err) => toast(err.message, 'error'));
+    else player.pause();
+  };
+  root.addEventListener('click', (e) => {
+    const play = e.target.closest('[data-aud-play]');
+    if (play) {
+      e.preventDefault();
+      return startAudio(play.dataset.audPlay);
+    }
+  });
+  root.addEventListener('input', (e) => {
+    const box = e.target.closest('[data-aud]');
+    if (!box) return;
+    if (e.target.matches('[data-aud-vol]')) {
+      player.volume = e.target.value / 100;
+      root.querySelectorAll('[data-aud-vol]').forEach((x) => x !== e.target && (x.value = e.target.value));
+      try {
+        localStorage.setItem('jr-audio-vol', String(player.volume));
+      } catch {
+        /* solo esta vez */
+      }
+    } else if (e.target.matches('[data-aud-seek]')) {
+      // Mover la barra de otra canción la pone a sonar desde ahí.
+      if (playingId !== box.dataset.aud) startAudio(box.dataset.aud);
+      const go = () => (player.currentTime = (e.target.value / 1000) * player.duration);
+      if (player.duration) go();
+      else player.addEventListener('loadedmetadata', go, { once: true });
+    }
+  });
+  root.addEventListener('change', (e) => {
+    const box = e.target.closest('[data-aud]');
+    if (!box || !e.target.matches('[data-aud-rate]')) return;
+    if (playingId === box.dataset.aud) player.playbackRate = Number(e.target.value);
+  });
+
   const videoTile = (v, showFolder) => `
-    <article class="tile tile-${v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="false">
+    <article class="tile tile-${isAudio(v) ? 'audio' : v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="false">
       <label class="sel" title="Seleccionar para una rutina"><input type="checkbox" data-sel-video="${v.id}"><b class="order"></b></label>
       <button class="card-pin${v.pinnedTop ? ' on' : ''}" data-pin-video="${v.id}" title="${v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${v.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(v.title)}" aria-pressed="${Boolean(v.pinnedTop)}">${PIN}</button>
       ${lockedIn(v, v.libraryId) ? '' : `<button class="card-del" data-del-video="${v.id}" title="Borrar" aria-label="Borrar ${esc(v.title)}">✕</button>`}
-      <a class="tile-thumb" href="#/video/${v.id}">${videoThumb(v)}</a>
-      <a class="tile-body" href="#/video/${v.id}">
+      ${audioFile(v) ? audioPlayer(v) : `<a class="tile-thumb" href="#/video/${v.id}">${videoThumb(v)}</a>`}
+      <${audioFile(v) ? 'div' : 'a'} class="tile-body" ${audioFile(v) ? '' : `href="#/video/${v.id}"`}>
         <h3><span class="name-edit" data-name="video:${v.id}" title="Haz clic para cambiar el nombre">${esc(v.title)}</span></h3>
-        <div class="meta"><span class="vstatus">${statusHtml(v)}</span><span>${esc(PLATFORM[v.source.platform] || '')}</span>${byTag(v)}${showFolder ? `<span>${esc(libraryLabel(libraryById(v.libraryId)))}</span>` : ''}</div>
-      </a>
+        <div class="meta"><span class="vstatus">${statusHtml(v)}</span>${v.source.platform === 'spotify' ? '' : `<span>${esc(PLATFORM[v.source.platform] || '')}</span>`}${byTag(v)}${showFolder ? `<span>${esc(libraryLabel(libraryById(v.libraryId)))}</span>` : ''}</div>
+      </${audioFile(v) ? 'div' : 'a'}>
     </article>`;
 
   // Rutina añadida a la página principal: se abre con un clic; la ✕ solo la quita de aquí.
   const routineTile = (r) => {
-    const exs = r.items.map((it) => exerciseById(it.exerciseId)).filter(Boolean);
+    const exs = r.items.map((it) => itemExercise(it)).filter(Boolean);
     const shown = exs.slice(0, 4);
     return `
       <article class="tile tile-routine" data-kind="routine" data-id="${r.id}">
-        <button class="card-del" data-unpin="${r.id}" title="Quitar de la página principal (la rutina no se borra)" aria-label="Quitar ${esc(r.name)} de la página principal">✕</button>
+        <button class="card-del" data-unpin="${r.id}" title="${isClass(folder) ? 'Quitar de la clase (la rutina no se borra)' : folder ? 'Quitar de esta carpeta (la rutina no se borra)' : 'Quitar de la página principal (la rutina no se borra)'}" aria-label="Quitar ${esc(r.name)} de la página principal">✕</button>
         <a class="tile-thumb" href="#/rutina/${r.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((e) => `<span>${exerciseFigure(e, 120)}</span>`).join('')}</span>`
           : '<span class="folder-empty">Vacía</span>'}</a>
@@ -726,14 +861,46 @@ export function renderLibrary(root, libraryId) {
     root.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
   };
 
+  // Dentro de una clase: barra para reproducirla (con su duración total), y en cada
+  // recuadro un chip con el tramo (videos) o el tiempo en pantalla (fotos y rutinas).
+  let classTotalRun = 0;
+  const drawClass = () => {
+    const bar = $('#classBar');
+    if (!isClass(folder)) return void (bar.hidden = true);
+    const lib = libraryById(folder.id);
+    const items = classItems(lib);
+    bar.hidden = false;
+    bar.innerHTML = `
+      <a class="btn primary" href="#/clase/${lib.id}" ${items.some(playable) ? '' : 'aria-disabled="true"'}>▶ Reproducir clase</a>
+      <span class="class-total"><span>Duración total</span> <b id="classTotal">…</b></span>`;
+    const run = ++classTotalRun;
+    totalSecs(lib).then((t) => run === classTotalRun && $('#classTotal') && ($('#classTotal').textContent = clock(t)));
+    for (const it of items) {
+      const tile = $(`#grid .tile[data-kind="${it.kind}"][data-id="${it.x.id}"]`);
+      if (!tile || tile.querySelector('.cls-chip')) continue;
+      const ok = playable(it);
+      const type = itemType(it);
+      tile.insertAdjacentHTML('beforeend', `<button class="cls-chip" data-cls-time="${it.kind}:${it.x.id}" ${ok ? '' : 'disabled'} title="${!ok ? 'Sin descargar: no entra en la clase' : type === 'video' ? 'Elegir el tramo que se reproduce en la clase' : 'Elegir cuánto tiempo se ve en la clase'}">⏱ ${ok ? esc(chipText(lib, it)) : 'Sin archivo'}</button>`);
+      // Entero (sin tramo): en vez de «Todo el…», lo que dura (Spotify, cuando ya se sabe).
+      const set = lib.classItems?.[it.x.id];
+      const whole = ok && ['video', 'spotify'].includes(type) && !(set && (set.start != null || set.end != null));
+      if (whole && (type === 'video' || set?.dur || it.x.source?.duration)) itemSecs(lib, it).then((t) => { const c = tile.querySelector('.cls-chip'); if (c && t) c.textContent = `⏱ ${clock(t)}`; });
+      // Spotify importado antes de saber su duración: se le pregunta una vez y se apunta.
+      else if (whole && type === 'spotify') api.spotifyCheck(it.x.source.url).then((r) => r?.duration && rememberDuration(lib, it.x.id, r.duration)).catch(() => {});
+    }
+  };
+
   const drawGrid = () => {
     setView(view);
     const { libs, vids } = visible();
     const searching = Boolean(filters.q.trim());
     const items = arranged();
     const nRt = items.filter((it) => it.kind === 'routine').length;
+    const nCls = libs.filter(isClass).length;
+    const nDirs = libs.length - nCls;
     $('#count').textContent = [
-      libs.length && `${libs.length} carpeta${libs.length === 1 ? '' : 's'}`,
+      nDirs && `${nDirs} carpeta${nDirs === 1 ? '' : 's'}`,
+      nCls && `${nCls} clase${nCls === 1 ? '' : 's'}`,
       nRt && `${nRt} rutina${nRt === 1 ? '' : 's'}`,
       `${vids.length} elemento${vids.length === 1 ? '' : 's'}`,
     ].filter(Boolean).join(' · ');
@@ -742,6 +909,8 @@ export function renderLibrary(root, libraryId) {
       ? items.map(tile).join('')
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
           <p>Usa <b>Importar</b> en el menú de la derecha para pegar links o imágenes, o arrastra aquí videos y fotos.</p></div>`);
+    drawClass();
+    drawAudio();
     drawSelection();
     pinCursor = -1;
     setPinLabel([...$('#grid').querySelectorAll('.tile:has(.card-pin.on)')], 0);
@@ -812,14 +981,13 @@ export function renderLibrary(root, libraryId) {
 
   // Carpeta compartida (esta o una de las de encima): con quién, y para gestionarlo.
   const drawShared = () => {
-    const el = $('#shareBar');
+    // La carpeta compartida en sí lleva junto al nombre el mismo botón que las bibliotecas (con
+    // cuántas personas hay); dentro de ella (compartido desde arriba) no sale nada.
     const sp = folder && sharedFolderOf(folder.id);
-    el.hidden = !sp;
-    if (!sp) return;
-    const top = libraryById(sp.rootId);
-    el.innerHTML = `<span>${SHARE_TAG}${esc(tr(sharedLabel(sp)))}${sp.rootId !== folder.id ? ` ${esc(tr(`(desde «${top?.name || sp.name}»)`))}` : ''}.
-      ${tr(sp.mine ? 'Pueden añadir cosas aquí.' : 'Puedes añadir cosas; lo de los demás solo lo quitan ellos o quien la comparte.')}</span>
-      <button class="btn small" data-share-folder="${sp.rootId}">${sp.mine ? 'Gestionar' : 'Ver quién está'}</button>`;
+    const slot = $('#folderShare');
+    if (slot) slot.innerHTML = sp && sp.rootId === folder.id
+      ? `<button class="shelf-share${sp.members.length > 1 ? ' on' : ''}" data-share-folder="${sp.rootId}" title="${sp.mine ? 'Gestionar con quién se comparte' : 'Ver quién está'}" aria-label="${sp.mine ? 'Gestionar con quién se comparte' : 'Ver quién está'}">${SHARE_TAG}<span>${sp.members.length}</span></button>`
+      : '';
   };
 
   // Sin Instagram conectado: aviso con el tutorial para conectarlo (se puede cerrar).
@@ -831,7 +999,7 @@ export function renderLibrary(root, libraryId) {
     } catch {
       /* sin almacenamiento: se enseña */
     }
-    el.hidden = state.instagram.connected || off;
+    el.hidden = globalThis.JR_WEB || state.instagram.connected || off;
     if (el.hidden) return;
     el.innerHTML = `<span>${ICON.instagram} ${state.instagram.expired ? '<b>Tu sesión de Instagram caducó.</b> Vuelve a conectarla para sincronizar tus colecciones y descargar sus videos.' : '<b>Conecta tu Instagram</b> para importar tus colecciones de Guardados (también las privadas) y descargar sus videos.'}</span>
       <button class="btn small primary" data-act="ig-connect">Ver cómo (2 min)</button>
@@ -847,6 +1015,37 @@ export function renderLibrary(root, libraryId) {
   // ---------- importar ----------
 
   const importTarget = () => $('#target')?.value || here();
+
+  // Rutinas ya creadas que se ponen en una biblioteca, carpeta o clase: una lista con casillas.
+  const addRoutines = (target) => {
+    const id = libraryById(target)?.root ? shelf.id : target;
+    const lib = libraryById(id);
+    if (!lib) return;
+    const dlg = document.createElement('dialog');
+    dlg.className = 'ask cls-dlg';
+    const list = [...state.routines].sort((a, b) => a.name.localeCompare(b.name));
+    dlg.innerHTML = `<h3>Añadir rutinas a «${esc(libraryLabel(lib))}»</h3>
+      ${list.length ? `<div class="cls-rt-list">${list.map((r) => `<label><input type="checkbox" value="${r.id}" ${isPinnedIn(r, id) ? 'checked disabled' : ''}> ${esc(r.name)}</label>`).join('')}</div>` : '<p>Aún no tienes rutinas.</p>'}
+      <footer><button class="btn ghost" data-cancel type="button">Cancelar</button><button class="btn primary" data-save type="button">Añadir</button></footer>`;
+    document.body.append(dlg);
+    dlg.addEventListener('close', () => dlg.remove());
+    dlg.showModal();
+    dlg.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-cancel]')) return dlg.close();
+      if (!e.target.closest('[data-save]')) return;
+      const ids = [...dlg.querySelectorAll('input:checked:not(:disabled)')].map((i) => i.value);
+      dlg.close();
+      try {
+        for (const rid of ids) {
+          upsert('routines', await api.updateRoutine(rid, { pinnedIn: [...new Set([...pinnedShelves(routineById(rid)), id])], pinned: true }));
+        }
+        emit('data');
+        if (ids.length) toast(`${ids.length} rutina(s) añadida(s) a «${libraryLabel(lib)}»`);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  };
 
   async function importLinks(urls, target) {
     if (!urls.length) return;
@@ -868,9 +1067,9 @@ export function renderLibrary(root, libraryId) {
 
   async function importFiles(files, target = here()) {
     const lists = files.filter((f) => /\.txt$/i.test(f.name));
-    const media = files.filter((f) => /^(video|image)\//.test(f.type) || /\.(mp4|m4v|mov|webm|mkv|png|jpe?g|webp|gif)$/i.test(f.name));
+    const media = files.filter((f) => /^(video|image|audio)\//.test(f.type) || /\.(mp4|m4v|mov|webm|mkv|png|jpe?g|webp|gif|mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i.test(f.name));
     for (const f of lists) await importLinks((await f.text()).split(/\s+/).filter(importable), target);
-    if (!media.length) return lists.length || toast('Solo se aceptan videos, fotos o un .txt con links', 'error');
+    if (!media.length) return lists.length || toast('Solo se aceptan videos, fotos, audio o un .txt con links', 'error');
     for (let i = 0; i < media.length; i++) {
       toast(`Subiendo ${i + 1} de ${media.length}: ${media[i].name}`);
       try {
@@ -1081,6 +1280,13 @@ export function renderLibrary(root, libraryId) {
   root.addEventListener('focusout', (e) => {
     if (e.target.id === 'libName') e.target.readOnly = true;
   });
+  // Nombre de la carpeta o clase: Intro guarda y sale de la edición; Esc deja el que había.
+  root.addEventListener('keydown', (e) => {
+    if (e.target.id !== 'libName' || e.target.readOnly || (e.key !== 'Enter' && e.key !== 'Escape')) return;
+    e.preventDefault();
+    if (e.key === 'Escape') e.target.value = libraryById(folder.id)?.name ?? e.target.value;
+    e.target.blur();
+  });
   // Las pestañas no se arrastran como links (eso las importaría como un video).
   root.addEventListener('dragstart', (e) => {
     if (e.target.closest?.('[data-shelf-pill]')) e.preventDefault();
@@ -1210,11 +1416,54 @@ export function renderLibrary(root, libraryId) {
     document.body.classList.add('tile-moving');
   };
 
+  // En el móvil (dedo): mantener pulsado medio segundo selecciona el recuadro y ya se puede
+  // arrastrar; si el dedo se mueve antes, es desplazar la página como siempre.
+  let touchHold = null;
+  let lastTouch = false;
   root.addEventListener('pointerdown', (e) => {
+    lastTouch = e.pointerType === 'touch';
     if (e.button !== 0 || moving) return;
     const tile = e.target.closest?.('#grid .tile[data-kind="video"], #grid .tile[data-kind="library"], #grid .tile[data-kind="routine"]');
     if (!tile || e.target.closest(NO_DRAG)) return;
+    if (lastTouch) {
+      clearTimeout(touchHold?.timer);
+      const hold = { x: e.clientX, y: e.clientY, tile, armed: false };
+      hold.timer = setTimeout(() => {
+        hold.armed = true;
+        navigator.vibrate?.(15);
+        const kind = tile.dataset.kind;
+        if (kind !== 'routine' && selectedIndex(kind, tile.dataset.id) < 0) toggleSelected(kind, tile.dataset.id);
+        suppressClick = true; // soltar sin arrastrar no abre el recuadro
+        press = { x: hold.x, y: hold.y, tile };
+      }, 450);
+      touchHold = hold;
+      return;
+    }
     press = { x: e.clientX, y: e.clientY, tile };
+  });
+  const onHoldMove = (e) => {
+    if (touchHold && !touchHold.armed && Math.hypot(e.clientX - touchHold.x, e.clientY - touchHold.y) > 8) {
+      clearTimeout(touchHold.timer);
+      touchHold = null;
+    }
+  };
+  document.addEventListener('pointermove', onHoldMove);
+  const endHold = () => {
+    if (!touchHold) return;
+    clearTimeout(touchHold.timer);
+    if (touchHold.armed && !moving) setTimeout(() => (suppressClick = false), 400);
+    touchHold = null;
+  };
+  document.addEventListener('pointerup', endHold);
+  document.addEventListener('pointercancel', endHold);
+  // Mientras se arrastra con el dedo, la página no se desplaza (si no, el navegador corta el arrastre).
+  const onHoldTouch = (e) => {
+    if (touchHold?.armed || moving) e.preventDefault();
+  };
+  document.addEventListener('touchmove', onHoldTouch, { passive: false });
+  // Mantener pulsado no abre el menú del navegador (abrir imagen, descargar…).
+  root.addEventListener('contextmenu', (e) => {
+    if (lastTouch && e.target.closest?.('#grid .tile')) e.preventDefault();
   });
   let pointer = null; // dónde está el ratón mientras se arrastra
   let scrollRaf = 0;
@@ -1248,6 +1497,7 @@ export function renderLibrary(root, libraryId) {
     e.preventDefault();
     pointer = { x: e.clientX, y: e.clientY };
     ghost.style.transform = `translate(${e.clientX - ghost.dataset.dx}px, ${e.clientY - ghost.dataset.dy}px) scale(0.55)`;
+    ghost.dataset.how = e.altKey ? 'Copiar' : e.ctrlKey ? 'Mover' : '';
     retarget(e.clientX, e.clientY);
     if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScroll);
   };
@@ -1260,7 +1510,8 @@ export function renderLibrary(root, libraryId) {
     const { videos, folders: libs, routines } = moving;
     endMove();
     if (at) return reorderTo(at, videos[0] || libs[0] || routines[0]);
-    if (t) return moveOrCopy(t.dataset.dropLib || null, videos, libs, e.clientX, e.clientY);
+    // Alt + soltar copia y Ctrl + soltar mueve, sin preguntar; sin tecla, sale el menú.
+    if (t) return moveOrCopy(t.dataset.dropLib || null, videos, libs, e.clientX, e.clientY, e.altKey ? 'copy' : e.ctrlKey ? 'move' : null);
   };
   const onTileKey = (e) => e.key === 'Escape' && moving && endMove();
   document.addEventListener('pointermove', onTileMove);
@@ -1284,7 +1535,7 @@ export function renderLibrary(root, libraryId) {
     const at = items.findIndex((it) => it.id === id);
     items.splice(at + (after ? 1 : 0), 0, { kind: videoById(dragged) ? 'video' : routineById(dragged) ? 'routine' : 'library', id: dragged });
     try {
-      const r = await api.orderItems(items, shelf.id);
+      const r = await api.orderItems(items, place());
       r.libraries.forEach((l) => upsert('libraries', l));
       r.videos.forEach((v) => upsert('videos', v));
       r.routines.forEach((x) => upsert('routines', x));
@@ -1387,7 +1638,7 @@ export function renderLibrary(root, libraryId) {
     }
     const sharing = libs.some((l) => [l.id, ...descendantIds(l.id)].some(id => spaceFor('folder', id)));
     const undoable = !sharing && !leaving.length;
-    if (!await ask(`¿Borrar ${parts.join(` ${tr('y')} `)}? Sus ejercicios también saldrán de las rutinas.${sharing ? ' Las personas con quienes la compartes dejarán de verla.' : ''} ${tr(undoable ? 'Puedes deshacerlo hasta cerrar la app.' : 'No se puede deshacer.')}`)) return;
+    if (!await ask(`¿Borrar ${parts.join(` ${tr('y')} `)}? Las rutinas conservan sus ejercicios.${sharing ? ' Las personas con quienes la compartes dejarán de verla.' : ''} ${tr(undoable ? 'Puedes deshacerlo hasta cerrar la app.' : 'No se puede deshacer.')}`)) return;
     try {
       const client = undoable ? actionApi() : baseApi;
       await removeVideos(videos.map((v) => v.id), client);
@@ -1436,10 +1687,34 @@ export function renderLibrary(root, libraryId) {
   });
 
   root.addEventListener('keydown', async (e) => {
-    if (e.target.id !== 'newLib' || e.key !== 'Enter') return;
+    if (e.key !== 'Enter' || !['newLib', 'newClassName'].includes(e.target.id)) return;
     e.preventDefault();
-    createFolder();
+    if (e.target.id === 'newLib') createFolder();
+    else createClass();
   });
+
+  // La clase se crea en la biblioteca o carpeta que se está viendo.
+  async function createClass() {
+    if (inClass()) return;
+    const name = $('#newClassName').value.trim();
+    if (!name) return $('#newClassName').focus();
+    try {
+      const picked = [...root.querySelectorAll('[data-cls-pick]:checked')].map((c) => c.dataset.clsPick.split(':'));
+      const lib = upsert('libraries', await api.createLibrary(name, folder?.id || topParent(), 'class'));
+      // Lo elegido entra ya: los videos y fotos se mueven a la clase; las rutinas se añaden.
+      const vids = picked.filter(([k]) => k === 'video').map(([, id]) => id);
+      if (vids.length) await moveVideos(vids, lib.id, api);
+      for (const [, id] of picked.filter(([k]) => k === 'routine')) {
+        upsert('routines', await api.updateRoutine(id, { pinnedIn: [...new Set([...pinnedShelves(routineById(id)), lib.id])], pinned: true }));
+      }
+      panel = null;
+      drawPanel();
+      emit('data');
+      toast(`Clase «${lib.name}» creada. Entra en ella y añade videos, fotos o rutinas.`);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
 
   async function createFolder() {
     const name = $('#newLib').value.trim();
@@ -1527,12 +1802,21 @@ export function renderLibrary(root, libraryId) {
       ui.returnToDraw = pick.dataset.pickSeg;
       return;
     }
+    const clsTime = t.closest('[data-cls-time]');
+    if (clsTime && isClass(folder)) {
+      e.preventDefault();
+      const [kind, id] = clsTime.dataset.clsTime.split(':');
+      const lib = libraryById(folder.id);
+      const it = classItems(lib).find((x) => x.kind === kind && x.x.id === id);
+      if (it) (['video', 'spotify'].includes(itemType(it)) ? openSegment(lib, it.x) : openSecs(lib, it));
+      return;
+    }
     if (t.closest('[data-pin-jump]')) return jumpToPinned();
     if (t.closest('[data-tile-import]')) return panel === 'import' ? $('#links').focus() : openPanel('import');
     const unpin = t.closest('[data-unpin]');
     if (unpin) {
-      await pinRoutines([unpin.dataset.unpin], false, shelf.id, api);
-      return toast(`Rutina quitada de «${shelfName(shelf)}» (sigue en Rutinas)`);
+      await pinRoutines([unpin.dataset.unpin], false, place(), api);
+      return toast(`Rutina quitada de «${folder ? folder.name : shelfName(shelf)}» (sigue en Rutinas)`);
     }
     const delVideo = t.closest('[data-del-video]');
     if (delVideo) return deleteItems([], [videoById(delVideo.dataset.delVideo)].filter(Boolean));
@@ -1691,6 +1975,8 @@ export function renderLibrary(root, libraryId) {
       openMegaPicker(lib?.id || here(), lib ? libraryLabel(lib) : '');
     }
     else if (act === 'new-lib') createFolder();
+    else if (act === 'add-routines') addRoutines(importTarget());
+    else if (act === 'new-class') createClass();
     else if (act === 'ig-connect') openInstagram({ view: 'connect' });
     else if (act === 'ig-tuto-off') {
       try {
@@ -1786,6 +2072,26 @@ export function renderLibrary(root, libraryId) {
   drawHide();
 
   $('#q').addEventListener('input', (e) => ((filters.q = e.target.value), drawGrid()));
+  // Móvil: el buscador se abre con la lupa; orden, vista y filtros van en un menú.
+  const bar = $('.lib-bar');
+  $('#qBtn').onclick = () => {
+    const open = bar.classList.toggle('q-open');
+    if (open) $('#q').focus();
+    else if (!$('#q').value) bar.classList.remove('q-open');
+  };
+  $('#q').addEventListener('blur', () => { if (!$('#q').value) bar.classList.remove('q-open'); });
+  const setTools = (on) => {
+    bar.classList.toggle('tools-open', on);
+    $('#toolsBtn').setAttribute('aria-expanded', String(on));
+  };
+  $('#toolsBtn').onclick = (e) => {
+    e.stopPropagation();
+    setTools(!bar.classList.contains('tools-open'));
+  };
+  document.addEventListener('pointerdown', function close(e) {
+    if (!root.isConnected) return document.removeEventListener('pointerdown', close);
+    if (bar.classList.contains('tools-open') && !e.target.closest('.lib-tools, #toolsBtn')) setTools(false);
+  });
 
   const onStore = (e) => {
     const { kind } = e.detail;
@@ -1815,6 +2121,7 @@ export function renderLibrary(root, libraryId) {
   };
   window.addEventListener('store', onStore);
   return () => {
+    player.pause();
     window.removeEventListener('store', onStore);
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('pointermove', onPillMove);
@@ -1822,6 +2129,11 @@ export function renderLibrary(root, libraryId) {
     document.removeEventListener('pointerup', onTileUp);
     document.removeEventListener('pointercancel', endMove);
     document.removeEventListener('keydown', onTileKey);
+    document.removeEventListener('pointermove', onHoldMove);
+    document.removeEventListener('pointerup', endHold);
+    document.removeEventListener('pointercancel', endHold);
+    document.removeEventListener('touchmove', onHoldTouch);
+    endHold();
     endMove();
     document.removeEventListener('pointerup', onPillUp);
     document.removeEventListener('keydown', onPillEsc);

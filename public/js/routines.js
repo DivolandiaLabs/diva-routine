@@ -4,7 +4,7 @@
 import { api } from './api.js';
 import { phasesSVG } from './figure.js';
 import {
-  state, refresh, emit, esc, toast, fmtTime, exerciseById, videoById, routineById, exerciseFigure,
+  state, refresh, emit, esc, toast, fmtTime, exerciseById, itemExercise, videoById, routineById, exerciseFigure,
   ui, drawings, routineFrom, pinRoutines, removeRoutine, spaceFor, addedByOther, who, sharedLabel,
   usedInRoutines, ask, shelves, shelfName, libraryById, pinnedShelves, setPinnedShelves, upsert,
 } from './store.js';
@@ -14,8 +14,11 @@ import { VIEWS, viewButtons, SORTS, SORT_ICON, PIN } from './views.js';
 import { lang, tr } from './i18n.js';
 import { normalizeTableStyle, tableStylePicker } from './routine-styles.js';
 
+const FOLDER_ICON = '<svg class="fold-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>';
+
 const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICON = {
+  folder: svg('<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/><path d="M12 11v6M9 14h6"/>'),
   create: svg('<path d="M9 6h11M9 12h11M9 18h6"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/><path d="M19 15v6M16 18h6"/>'),
   pin: svg('<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/>'),
   copy: svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>'),
@@ -72,7 +75,7 @@ export function renderRoutines(root) {
         </div>
         <h3 class="sec-title">Rutinas <small id="nRt"></small></h3>
         <div class="tiles" id="rtGrid"></div>
-        <h3 class="sec-title">Secuencias de ejercicios <small id="nEx"></small></h3>
+        <h3 class="sec-title"><span id="exTitle">Secuencias de ejercicios</span> <small id="nEx"></small></h3>
         <p class="hint" id="exHint"></p>
         <div class="tiles" id="exGrid"></div>
       </section>
@@ -257,13 +260,40 @@ export function renderRoutines(root) {
     else upsert('routines', await api.updateRoutine(id, { tabs: [...(r.tabs || []), tab.id] }));
   }
 
-  const visibleDrawings = () =>
-    sorted(drawings().filter((e) => matches([e.title, e.category, videoById(e.videoId)?.title, ...(e.technique?.tags || [])].join(' '))), (e) => e.title, (e) => e.category || '');
+  // Carpetas de secuencias: la abierta se recuerda. Al buscar se ve todo, esté donde esté.
+  let openFolder = '';
+  try {
+    openFolder = localStorage.getItem('jr-seq-folder') || '';
+  } catch {
+    /* sin almacenamiento */
+  }
+  const seqFolders = () => [...(state.seqFolders || [])].sort((a, b) => a.name.localeCompare(b.name, lang));
+  const folderNow = () => seqFolders().find((f) => f.id === openFolder) || null;
+  const setFolder = (id) => {
+    openFolder = id || '';
+    try {
+      localStorage.setItem('jr-seq-folder', openFolder);
+    } catch {
+      /* solo esta vez */
+    }
+    drawGrids();
+  };
+  const searching = () => Boolean(filters.q.trim());
+  const inFolderNow = (e) => {
+    const f = folderNow();
+    const own = seqFolders().some((x) => x.id === e.folderId) ? e.folderId : '';
+    return (f ? f.id : '') === own;
+  };
+  const exInTab = (e, t) => Boolean(e.tabs?.includes(t.id));
+  const visibleDrawings = () => {
+    const tab = tabNow();
+    return sorted(drawings().filter((e) => (!tab || exInTab(e, tab)) && (searching() || inFolderNow(e)) && matches([e.title, e.category, videoById(e.videoId)?.title, ...(e.technique?.tags || [])].join(' '))), (e) => e.title, (e) => e.category || '');
+  };
 
   // ---------- recuadros ----------
 
   const routineTile = (r) => {
-    const exs = r.items.map((it) => exerciseById(it.exerciseId)).filter(Boolean);
+    const exs = r.items.map((it) => itemExercise(it)).filter(Boolean);
     const shown = exs.slice(0, 4);
     return `
       <article class="tile tile-routine" data-kind="routine" data-id="${r.id}" draggable="true">
@@ -292,6 +322,30 @@ export function renderRoutines(root) {
       <span class="nr-plus">+</span><span>Añadir secuencia</span><small>Elige de tus bibliotecas</small>
     </button>`;
 
+  // Carpeta de secuencias: clic para abrirla; suelta encima secuencias para guardarlas dentro.
+  const folderTile = (f) => {
+    const inside = drawings().filter((e) => e.folderId === f.id);
+    const phases = inside.slice(0, 4).map((e) => phasesSVG(e.keyframes, { size: 120, numbers: false })[0]).filter(Boolean);
+    return `
+      <article class="tile tile-seq-folder" data-seq-folder="${f.id}" title="Clic para abrir · suelta aquí secuencias para guardarlas en la carpeta">
+        <button class="card-del" data-del-seq-folder="${f.id}" title="Quitar la carpeta (sus secuencias no se borran: salen fuera)" aria-label="Quitar la carpeta ${esc(f.name)}">✕</button>
+        <div class="tile-thumb seq-folder-thumb">${phases.length ? `<span class="mosaic m${phases.length}">${phases.map((p) => `<span>${p.svg}</span>`).join('')}</span>` : FOLDER_ICON}</div>
+        <div class="tile-body">
+          <h3>${FOLDER_ICON}<span data-edit-seq-folder="${f.id}" contenteditable="plaintext-only" spellcheck="false" title="Clic para cambiar el nombre">${esc(f.name)}</span></h3>
+          <div class="meta"><span>${inside.length} secuencia${inside.length === 1 ? '' : 's'}</span></div>
+        </div>
+      </article>`;
+  };
+  const newFolderTile = () => `
+    <button class="tile tile-new-routine tile-new-seq-folder" data-new-seq-folder title="Crear una carpeta para ordenar secuencias">
+      <span class="nr-plus">+</span><span>Nueva carpeta</span><small>Arrastra aquí secuencias</small>
+    </button>`;
+  // Dentro de una carpeta: volver a todas (y soltar aquí para sacar secuencias de la carpeta).
+  const backTile = () => `
+    <button class="tile tile-new-routine tile-seq-back" data-seq-folder="" title="Volver a todas las secuencias · suelta aquí para sacarlas de la carpeta">
+      <span class="nr-plus">←</span><span>Todas las secuencias</span><small>Suelta aquí para sacarlas</small>
+    </button>`;
+
   const drawingTile = (e) => {
     const v = videoById(e.videoId);
     const phases = phasesSVG(e.keyframes, { size: 120, numbers: false }).slice(0, 4);
@@ -314,7 +368,7 @@ export function renderRoutines(root) {
   const drawTabs = () => {
     const tab = tabNow();
     $('#rtTabs').innerHTML = `
-      <button class="shelf-pill${tab ? '' : ' on'}" data-rt-tab="">${esc(tr('Todas las Rutinas'))}</button>
+      <button class="shelf-pill${tab ? '' : ' on'}" data-rt-tab="" data-drop-all title="Suelta aquí secuencias para sacarlas de la pestaña abierta">${esc(tr('Todas las Rutinas'))}</button>
       ${tabs().map((t) => `<button class="shelf-pill${t === tab ? ' on' : ''}" data-rt-tab="${t.id}" data-drop-tab="${t.id}" draggable="true" title="${t === tab && !t.libraryId ? 'Haz clic para cambiar el nombre · arrastra para moverla' : 'Arrastra para moverla'}">${esc(tabName(t))}</button>`).join('')}
       <button class="shelf-add" data-rt-tab-add title="Añadir pestaña de rutinas" aria-label="Añadir pestaña de rutinas">+</button>`;
     $('#rtTitle').innerHTML = tab
@@ -448,11 +502,20 @@ export function renderRoutines(root) {
     $('#rtGrid').innerHTML = newRoutineTile() + rts.map(routineTile).join('')
       + (!rts.length && state.routines.length ? '<p class="hint">Ninguna rutina coincide con la búsqueda.</p>' : '');
     // Con secuencias no hace falta explicación; sin ninguna, se dice cómo sacarlas.
-    $('#exHint').hidden = drawings().length > 0;
-    $('#exHint').innerHTML = drawings().length
+    const tabEmpty = drawings().length > 0 && tabNow() && !exs.length && !searching();
+    $('#exHint').hidden = drawings().length > 0 && !tabEmpty;
+    $('#exHint').innerHTML = tabEmpty
+      ? `Aún no hay secuencias en «${esc(tabName(tabNow()))}». Ve a «Todas las Rutinas» y arrastra secuencias a esta pestaña de la barra de arriba.`
+      : drawings().length
       ? ''
-      : 'Aún no hay secuencias de ejercicios. En la <a href="#/biblioteca">Biblioteca</a> selecciona videos o carpetas y pulsa <b>Dibujos</b>.';
-    $('#exGrid').innerHTML = addDrawingTile() + exs.map(drawingTile).join('');
+      : 'Aún no hay secuencias de ejercicios. Abre un video o una foto de la <a href="#/biblioteca">Biblioteca</a> y crea sus viñetas.';
+    const folder = folderNow();
+    $('#exTitle').innerHTML = folder && !searching()
+      ? `<a href="javascript:void 0" data-seq-folder="">${esc(tr('Secuencias de ejercicios'))}</a> › ${esc(folder.name)}`
+      : esc(tr('Secuencias de ejercicios'));
+    $('#exGrid').innerHTML = searching() ? exs.map(drawingTile).join('')
+      : folder ? backTile() + exs.map(drawingTile).join('')
+      : addDrawingTile() + seqFolders().map(folderTile).join('') + exs.map(drawingTile).join('');
     drawPicks();
     drawJump();
   };
@@ -514,6 +577,7 @@ export function renderRoutines(root) {
       </button>`;
     $('#opts').innerHTML = [
       item('create', 'Rutina', { badge: pickedEx.length, ready: pickedEx.length > 0 && panel !== 'create', title: 'Montar una rutina con las secuencias elegidas' }),
+      item('folder', 'Carpeta', { badge: pickedEx.length, title: pickedEx.length ? 'Crear una carpeta con las secuencias marcadas' : 'Crear una carpeta de secuencias' }),
       item('pin', 'Bibliotecas', { badge: pickedRt.length, disabled: !pickedRt.length, title: 'Elegir en qué bibliotecas se ven las rutinas marcadas' }),
       item('copy', 'Copiar', { badge: pickedEx.length + pickedRt.length, disabled: !(pickedEx.length + pickedRt.length), title: 'Duplicar las rutinas y secuencias marcadas' }),
       item('move', 'Mover', { badge: pickedRt.length, disabled: !pickedRt.length, title: 'Mover las rutinas marcadas a otra pestaña' }),
@@ -679,6 +743,27 @@ export function renderRoutines(root) {
   });
 
   root.addEventListener('click', async (e) => {
+    const delF = e.target.closest('[data-del-seq-folder]');
+    if (delF) {
+      const f = seqFolders().find((x) => x.id === delF.dataset.delSeqFolder);
+      if (!f || !await ask(`¿Quitar la carpeta «${f.name}»? Sus secuencias no se borran: salen fuera de la carpeta.`)) return;
+      try {
+        await api.deleteSeqFolder(f.id);
+        state.seqFolders = (state.seqFolders || []).filter((x) => x.id !== f.id);
+        for (const x of drawings()) if (x.folderId === f.id) delete x.folderId;
+        if (openFolder === f.id) openFolder = '';
+        drawGrids();
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
+    if (e.target.closest('[data-new-seq-folder]')) return newFolder();
+    const openF = e.target.closest('[data-seq-folder]');
+    if (openF && !e.target.closest('[data-edit-seq-folder]')) {
+      e.preventDefault();
+      return setFolder(openF.dataset.seqFolder);
+    }
     const t = e.target;
     if (t.closest('[data-close]')) return ((panel = null), drawPanel());
     // Nueva rutina: se crea vacía y se queda aquí, sin pasar por el panel de crear.
@@ -717,7 +802,7 @@ export function renderRoutines(root) {
       try {
         await api.deleteRoutineTab(delTab);
         state.routineTabs = state.routineTabs.filter((x) => x.id !== delTab);
-        for (const r of state.routines) if (r.tabs?.includes(delTab)) r.tabs = r.tabs.filter((x) => x !== delTab);
+        for (const r of [...state.routines, ...drawings()]) if (r.tabs?.includes(delTab)) r.tabs = r.tabs.filter((x) => x !== delTab);
         return selectTab(activeTab === delTab ? '' : activeTab);
       } catch (err) {
         return toast(err.message, 'error');
@@ -740,6 +825,7 @@ export function renderRoutines(root) {
     if (menu === 'create') return ((panel = panel === 'create' ? null : 'create'), drawPanel());
     if (menu === 'pin') return shelfMenu(t.closest('[data-menu]'));
     if (menu === 'copy') return copyPicked();
+    if (menu === 'folder') return newFolder([...pickedEx]);
     if (menu === 'move') return moveMenu(t.closest('[data-menu]'));
     if (menu === 'undo') return undoLast();
     if (menu === 'selectAll') {
@@ -802,6 +888,25 @@ export function renderRoutines(root) {
     if (tile) tile.draggable = !editing(e.target);
   });
   // El nombre de la rutina va dentro del enlace que la abre: un clic en él edita, no abre.
+  root.addEventListener('focusout', async (e) => {
+    const el = e.target.closest?.('[data-edit-seq-folder]');
+    if (!el) return;
+    const f = seqFolders().find((x) => x.id === el.dataset.editSeqFolder);
+    const name = el.textContent.trim();
+    if (!f || !name || name === f.name) return (el.textContent = f?.name || '');
+    try {
+      Object.assign(f, await api.renameSeqFolder(f.id, name));
+    } catch (err) {
+      toast(err.message, 'error');
+      el.textContent = f.name;
+    }
+  });
+  root.addEventListener('keydown', (e) => {
+    if (e.target.closest?.('[data-edit-seq-folder]') && (e.key === 'Enter' || e.key === 'Escape')) {
+      e.preventDefault();
+      e.target.blur();
+    }
+  });
   root.addEventListener('click', (e) => {
     if (e.target.closest?.('[data-edit-rt]')) e.preventDefault();
   });
@@ -877,7 +982,71 @@ export function renderRoutines(root) {
     root.classList.add('drag-active');
   });
 
-  const dropTarget = (e) => e.target.closest?.('.tile-routine, [data-new-routine]');
+  const dropTarget = (e) => e.target.closest?.('.tile-routine, [data-new-routine], [data-seq-folder], [data-new-seq-folder]');
+  /** Pone secuencias en una pestaña (tab null: las saca de la pestaña abierta). */
+  async function putSeqInTab(ids, tab) {
+    const from = tabNow();
+    if (!tab && !from) return toast('Abre una pestaña para sacar de ella secuencias');
+    try {
+      const was = ids.map((id) => ({ id, tabs: exerciseById(id).tabs || [] }));
+      let n = 0;
+      for (const id of ids) {
+        const now = exerciseById(id).tabs || [];
+        const next = tab ? (now.includes(tab.id) ? now : [...now, tab.id]) : now.filter((x) => x !== from.id);
+        if (next.length === now.length) continue;
+        upsert('exercises', await api.updateExercise(id, { tabs: next }));
+        n++;
+      }
+      if (n) remember(async () => {
+        for (const w of was) if (exerciseById(w.id)) upsert('exercises', await api.updateExercise(w.id, { tabs: w.tabs }));
+      });
+      toast(tab ? (n ? `${n} secuencia(s) en «${tabName(tab)}»` : `Ya estaba${ids.length === 1 ? '' : 'n'} en «${tabName(tab)}»`) : `${n} secuencia(s) fuera de «${tabName(from)}»`);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+    drawGrids();
+  }
+  /** Guarda secuencias en una carpeta ('' = fuera de las carpetas). */
+  async function putInFolder(ids, folderId) {
+    for (const id of ids) {
+      const e = exerciseById(id);
+      if (!e || (e.folderId || '') === folderId) continue;
+      e.folderId = folderId || null;
+      upsert('exercises', await api.updateExercise(id, { folderId: folderId || null }));
+    }
+    drawGrids();
+  }
+  async function newFolder(ids = []) {
+    const name = await askName(tr('Nombre de la carpeta'));
+    if (!name) return;
+    const f = await api.createSeqFolder(name);
+    (state.seqFolders ||= []).push(f);
+    if (ids.length) await putInFolder(ids, f.id);
+    else drawGrids();
+    toast(ids.length ? `${ids.length} secuencia(s) en «${f.name}»` : `Carpeta «${f.name}» creada`);
+  }
+  /** Pide un nombre en una ventanita (Enter acepta, Esc cancela). */
+  const askName = (label) => new Promise((done) => {
+    const d = document.createElement('dialog');
+    d.className = 'dlg name-dlg';
+    d.innerHTML = `<form><label class="field">${esc(label)}<input maxlength="60" autofocus></label><div class="row"><button type="button" class="btn" data-no>Cancelar</button><button type="submit" class="btn primary">Crear</button></div></form>`;
+    let answered = false;
+    const finish = (v) => {
+      if (answered) return;
+      answered = true;
+      d.close();
+      d.remove();
+      done(v);
+    };
+    d.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      finish(d.querySelector('input').value.trim());
+    });
+    d.querySelector('[data-no]').addEventListener('click', () => finish(''));
+    d.addEventListener('cancel', () => finish(''));
+    document.body.append(d);
+    d.showModal();
+  });
 
   // Soltar sobre otro dibujo lo coloca antes o después de él, según el lado.
   const drawingTarget = (e) => {
@@ -898,7 +1067,8 @@ export function renderRoutines(root) {
     }
   }
 
-  const tabTarget = (e) => (draggedRt || draggedTab ? e.target.closest?.('[data-drop-tab]') : null);
+  const tabTarget = (e) => (draggedRt || draggedTab ? e.target.closest?.('[data-drop-tab]')
+    : dragged ? e.target.closest?.('[data-drop-tab], [data-drop-all]') : null);
   // Arrastrando un dibujo cerca del borde de arriba (bajo las barras fijas) o de abajo, la página
   // se desplaza sola, más deprisa cuanto más cerca del borde: así se llega a las rutinas.
   let dragY = null;
@@ -922,7 +1092,16 @@ export function renderRoutines(root) {
   };
   document.addEventListener('dragover', onDragEdge);
   root.addEventListener('dragover', (e) => {
-    if (tabTarget(e)) e.preventDefault();
+    const pill = tabTarget(e);
+    if (pill) {
+      e.preventDefault();
+      if (dragged) {
+        e.dataTransfer.dropEffect = 'copy';
+        root.querySelectorAll('.drop-over').forEach((x) => x !== pill && x.classList.remove('drop-over'));
+        pill.classList.add('drop-over');
+        return;
+      }
+    }
     const slot = drawingTarget(e);
     clearSlots(slot);
     if (slot) {
@@ -961,6 +1140,12 @@ export function renderRoutines(root) {
 
   root.addEventListener('drop', async (e) => {
     const tabEl = tabTarget(e);
+    if (tabEl && dragged) {
+      e.preventDefault();
+      const ids = dragged.filter((x) => exerciseById(x));
+      endDrag();
+      return putSeqInTab(ids, tabEl.matches('[data-drop-all]') ? null : tabs().find((x) => x.id === tabEl.dataset.dropTab));
+    }
     if (tabEl) {
       e.preventDefault();
       const id = draggedRt;
@@ -990,6 +1175,12 @@ export function renderRoutines(root) {
     const ids = dragged.filter((id) => exerciseById(id));
     endDrag();
     try {
+      if (t.matches('[data-new-seq-folder]')) return await newFolder(ids);
+      if (t.matches('[data-seq-folder]')) {
+        const f = seqFolders().find((x) => x.id === t.dataset.seqFolder);
+        await putInFolder(ids, f ? f.id : '');
+        return toast(f ? `${ids.length} secuencia(s) en «${f.name}»` : `${ids.length} secuencia(s) fuera de la carpeta`);
+      }
       if (t.matches('[data-new-routine]')) {
         const r = await routineFrom(ids, { name: tr(`Rutina ${new Date().toLocaleDateString(lang)}`) });
         if (tabNow()) await putInTab(r.id, tabNow());

@@ -172,6 +172,9 @@ function start() {
       openOutside(url);
     });
     win.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https:\/\/accounts\.spotify\.com\//i.test(url)) {
+        return { action: 'allow', overrideBrowserWindowOptions: { width: 520, height: 760, parent: win, autoHideMenuBar: true, title: 'Spotify' } };
+      }
       openOutside(url);
       return { action: 'deny' };
     });
@@ -186,6 +189,22 @@ function start() {
         e.preventDefault();
         win.webContents.toggleDevTools();
       }
+    });
+    // Pantalla completa de verdad (sobre la barra de tareas): en Windows, con la ventana maximizada,
+    // la de la página se queda dentro del área de trabajo; se quita el maximizado mientras dura.
+    let wasMaximized = false;
+    win.on('enter-html-full-screen', () => {
+      wasMaximized = win.isMaximized();
+      if (wasMaximized) win.unmaximize();
+      win.setFullScreen(true);
+      // Con un video sonando, Windows a veces deja la barra de tareas encima: la ventana se pone delante de todo.
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.focus();
+    });
+    win.on('leave-html-full-screen', () => {
+      win.setAlwaysOnTop(false);
+      win.setFullScreen(false);
+      if (wasMaximized) win.maximize();
     });
     win.on('closed', () => (win = null));
     // La app siempre con su código de ahora: nada de lo guardado de una versión anterior.

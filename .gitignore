@@ -5,3 +5,4 @@ firebase-config.json
 dist/
 build/config/
 node_modules/
+web/dist/

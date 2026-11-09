@@ -2,7 +2,7 @@
 import { api } from './api.js';
 import { phasesSVG } from './figure.js';
 import {
-  esc, toast, fmtTime, debounce, upsert, refresh, emit, routineById, exerciseById, videoById, ui, removeRoutine, pinRoutines, CATEGORIES,
+  esc, toast, fmtTime, debounce, upsert, refresh, emit, routineById, exerciseById, itemExercise, videoById, ui, removeRoutine, pinRoutines, CATEGORIES,
   spaceFor, sharedLabel,
   drawings, ask, pinnedShelves, setPinnedShelves, shelves, shelfName, libraryById, state, restoreDrawings, improveWithAi,
 } from './store.js';
@@ -28,6 +28,7 @@ export function renderRoutine(root, id) {
       <button class="btn small" data-act="add" title="Elegir más secuencias en Rutinas">+ Añadir ejercicios</button>
       <button class="btn small" data-act="pin" id="pinBtn"></button>
       <button class="btn small" data-act="share" title="Que otras personas puedan ver y cambiar esta rutina">${SHARE_TAG}Editores</button>
+      <button class="btn small icon-btn" data-act="undo" id="undoBtn" title="Deshacer el último cambio (Ctrl+Z)" aria-label="Deshacer" disabled><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
       <button class="btn primary" data-act="print">Imprimir / PDF</button>
       <button class="btn small ghost danger" data-act="del" id="delBtn">Eliminar</button>
     </div>
@@ -90,7 +91,34 @@ export function renderRoutine(root, id) {
       toast(e.message, 'error');
     }
   }, 400);
-  const save = () => ((dirty = true), flushSave());
+  // Deshacer: cada cambio guarda cómo estaba la rutina antes (hasta 50 pasos).
+  const snap = () => JSON.stringify({ name: r.name, subtitle: r.subtitle || '', items: r.items, tableStyle: r.tableStyle });
+  const history = [];
+  let last = snap();
+  const drawUndo = () => { const b = root.querySelector('#undoBtn'); if (b) b.disabled = !history.length; };
+  const save = () => {
+    const now = snap();
+    if (now !== last) {
+      history.push(last);
+      if (history.length > 50) history.shift();
+      last = now;
+      drawUndo();
+    }
+    dirty = true;
+    flushSave();
+  };
+  const undo = () => {
+    if (!history.length) return;
+    const prev = history.pop();
+    Object.assign(r, JSON.parse(prev));
+    last = prev;
+    dirty = true;
+    flushSave();
+    if (document.activeElement?.id !== 'rname') $('#rname').value = r.name;
+    applyTableStyle();
+    draw();
+    drawUndo();
+  };
   const applyTableStyle = () => {
     const style = normalizeTableStyle(r.tableStyle);
     $('.sheet').dataset.tableStyle = style;
@@ -117,20 +145,20 @@ export function renderRoutine(root, id) {
   const cuesOf = (it, e) => it.cues ?? e.technique?.cues ?? [];
 
   function draw() {
-    r.items = r.items.filter((it) => exerciseById(it.exerciseId));
+    r.items = r.items.filter((it) => itemExercise(it));
     if (document.activeElement?.id !== 'rmeta') $('#rmeta').textContent = r.subtitle || tr(`${r.items.length} ejercicios · ${new Date().toLocaleDateString(lang, { day: 'numeric', month: 'long', year: 'numeric' })}`);
     if (!r.items.length) {
       $('#table').innerHTML = '<div class="empty-state"><p>Esta rutina no tiene ejercicios. Pulsa <b>+ Añadir ejercicios</b>.</p></div>';
       return;
     }
     // La leyenda de colores solo hace falta si queda alguna figura dibujada (sin viñeta).
-    $('#legend').hidden = !r.items.some((it) => (exerciseById(it.exerciseId).keyframes || []).some((k) => !k.img));
+    $('#legend').hidden = !r.items.some((it) => (itemExercise(it).keyframes || []).some((k) => !k.img));
     let lastCat = null;
     $('#table').innerHTML = `
       <table class="routine-table">
         <thead><tr><th>#</th><th>Ejercicio</th><th>Secuencia</th><th>Técnica</th><th class="no-print"></th></tr></thead>
         <tbody>${r.items.map((it, i) => {
-          const e = exerciseById(it.exerciseId);
+          const e = itemExercise(it);
           const v = videoById(e.videoId);
           const order = phaseOrder(it, e);
           const seq = order.length
@@ -217,7 +245,7 @@ export function renderRoutine(root, id) {
       it.captions = { ...it.captions, [el.dataset.cap]: text };
       if (!text) delete it.captions[el.dataset.cap];
     } else if (el.dataset.cue) {
-      it.cues = [...cuesOf(it, exerciseById(it.exerciseId))];
+      it.cues = [...cuesOf(it, itemExercise(it))];
       it.cues[+el.dataset.cue] = text;
     } else return;
     save();
@@ -249,7 +277,7 @@ export function renderRoutine(root, id) {
     const aiEx = e.target.closest('[data-ai]');
     if (aiEx) {
       const it = r.items[+aiEx.closest('.ritem').dataset.i];
-      const own = exerciseById(it.exerciseId);
+      const own = itemExercise(it);
       // Con viñetas marcadas, solo esas; sin ninguna, toda la secuencia de la fila (las que se ven y tienen imagen).
       const marked = [...(picked.get(it) || [])];
       const ks = marked.length ? marked : phaseOrder(it, own).filter((k) => framesOf(it, own)[k]?.img);
@@ -443,14 +471,14 @@ export function renderRoutine(root, id) {
   // Pasa la viñeta a otro ejercicio de la rutina: allí queda donde se suelte, con su texto.
   const movePhase = (e) => {
     const to = r.items[+e.target.closest('.ritem').dataset.i];
-    const toEx = exerciseById(to.exerciseId);
+    const toEx = itemExercise(to);
     const start = r.items[dragPhase.i];
     const moving = isPicked(start, dragPhase.k)
       ? [...picked].flatMap(([it, ks]) => (it === to ? [] : [...ks].map((k) => ({ it, k }))))
       : [{ it: start, k: dragPhase.k }];
     const added = [];
     for (const { it: from, k } of moving) {
-      to.extra = [...(to.extra || []), framesOf(from, exerciseById(from.exerciseId))[k]];
+      to.extra = [...(to.extra || []), framesOf(from, itemExercise(from))[k]];
       const n = framesOf(to, toEx).length - 1;
       const caption = from.captions?.[k];
       if (caption) to.captions = { ...to.captions, [n]: caption };
@@ -509,7 +537,7 @@ export function renderRoutine(root, id) {
           dragPhase = null;
           return;
         }
-        const order = phaseOrder(it, exerciseById(it.exerciseId)).filter((k) => !group.includes(k));
+        const order = phaseOrder(it, itemExercise(it)).filter((k) => !group.includes(k));
         const box = fig.getBoundingClientRect();
         order.splice(order.indexOf(+fig.dataset.k) + (e.clientX > box.left + box.width / 2 ? 1 : 0), 0, ...group);
         it.phases = order;
@@ -534,7 +562,17 @@ export function renderRoutine(root, id) {
     root.querySelectorAll('.ritem.dragging, .ritem.over, .seq.over, .seq figure.dragging, .seq figure.over').forEach((x) => x.classList.remove('dragging', 'over'));
   });
 
+  const onUndoKey = (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
+    if (e.target.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])')) return;
+    e.preventDefault();
+    undo();
+  };
+  document.addEventListener('keydown', onUndoKey);
+  root.addEventListener('click', (e) => e.target.closest('[data-act="undo"]') && undo());
+
   return () => {
+    document.removeEventListener('keydown', onUndoKey);
     window.removeEventListener('store', onStore);
     flushSave.flush();
   };

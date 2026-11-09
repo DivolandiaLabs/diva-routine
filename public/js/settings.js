@@ -7,11 +7,47 @@
 import { api } from './api.js';
 import { mountMega } from './mega.js';
 import { openNet, NET_INFO } from './redes.js';
-import { CLOUDS, NET_ICON, SAVED_HINT, ICON_IG } from './library.js';
+import { CLOUDS, NET_ICON, SAVED_HINT, ICON_IG, spotifyCard } from './library.js';
 import { esc, toast, sleep, ask, state, emit, modelPicker, styleTiles, chooseAi, ui, shelves, shelfName, libraryById, upsert, queueDownload, canDownload } from './store.js';
 import { LANGS, lang, setLang, tr } from './i18n.js';
 
 const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+// Atajos de teclado y ratón de toda la app, por apartados.
+const KEYS = [
+  ['Bibliotecas', [
+    ['Alt + arrastrar', 'Copia el elemento en la carpeta o biblioteca donde lo sueltas, sin preguntar.'],
+    ['Ctrl + arrastrar', 'Mueve el elemento a la carpeta o biblioteca donde lo sueltas, sin preguntar.'],
+    ['Arrastrar', 'Al soltar en una carpeta o biblioteca, pregunta si mover o copiar.'],
+    ['Esc', 'Cancela el arrastre.'],
+    ['Ctrl + rueda', 'Cambia el tamaño de la vista.'],
+    ['Doble clic en el nombre', 'Cambia el nombre de la carpeta o biblioteca.'],
+  ]],
+  ['Video', [
+    ['Espacio', 'Reproduce o pausa.'],
+    ['← →', 'Mueve 0,1 s (con Mayús, 1 s).'],
+    ['I / O', 'Marcan el inicio y el fin del tramo.'],
+  ]],
+  ['Clase', [
+    ['Espacio', 'Reproduce o pausa.'],
+    ['← →', 'Elemento anterior o siguiente.'],
+  ]],
+  ['Textos que se editan encima', [
+    ['Intro', 'Guarda.'],
+    ['Esc', 'Deja lo que había.'],
+  ]],
+];
+// Versión web: estas secciones se ven, pero necesitan el programa de Windows o la cuenta de Google (que llegará).
+const WEB_OFF = {
+  social: 'Conectar redes sociales y descargar sus vídeos',
+  folder: 'Usar una carpeta compartida del ordenador',
+};
+const APP_URL = 'https://github.com/DivolandiaLabs/diva-routine/releases/latest';
+const webNote = (what) => `<div class="web-note"><b>${esc(tr(what))}</b> ${esc(tr('aún no está disponible en la versión web.'))} <a href="${APP_URL}" target="_blank" rel="noopener">${esc(tr('Descargar la app de Windows'))}</a></div>`;
+
+const keysPane = () => `<section class="set-card"><h3>Atajos de teclado</h3>
+  ${KEYS.map(([group, rows]) => `<h4 class="keys-group">${group}</h4><dl class="keys">${rows.map(([k, what]) => `<dt>${k.split(' + ').map((x) => `<kbd>${x}</kbd>`).join(' + ')}</dt><dd>${what}</dd>`).join('')}</dl>`).join('')}
+</section>`;
+
 const ICON = {
   app: svg('<path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>'),
   account: svg('<circle cx="12" cy="8" r="3.3"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'),
@@ -23,6 +59,7 @@ const ICON = {
   social: svg('<circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="m8.3 10.8 7.4-3.6M8.3 13.2l7.4 3.6"/>'),
   cloud: svg('<path d="M7 18h11.5a3.5 3.5 0 0 0 .5-7 5.5 5.5 0 0 0-10.4-1.6A4.5 4.5 0 0 0 7 18z"/>'),
   sidebar: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'),
+  keys: svg('<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'),
   theme: svg('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-.6-.3-1-.6-1.4-.3-.4-.6-.8-.6-1.3 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.2-4-7.5-9-7.5z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>'),
   backup: svg('<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 10h16M10 14h4"/>'),
   about: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
@@ -155,7 +192,7 @@ function mountSettings(root, section) {
     } else if (!g.connected) {
       body = `
         <div class="row wrap">
-          <a class="btn primary g-login" href="/api/google/login">Iniciar sesión con Google</a>
+          <a class="btn primary g-login" href="api/google/login">Iniciar sesión con Google</a>
         </div>
         <p class="hint">Se abre Google: elige tu cuenta y da permiso a «Diva Routine» para guardar sus datos en tu Drive. Si aparece «Google no ha verificado esta app», pulsa <b>Configuración avanzada → Ir a Diva Routine</b>: es tu propia app.</p>`;
     } else {
@@ -440,7 +477,7 @@ function mountSettings(root, section) {
     </section>` },
     { id: 'social', label: 'Redes sociales', icon: ICON.social, html: `<section class="set-card">
       <h3>Redes sociales</h3>
-      <p class="hint">Instagram, YouTube, TikTok, Facebook y X: conecta tus cuentas e importa tus colecciones.</p>
+      <p class="hint">Instagram, YouTube, TikTok, Facebook y X: conecta tus cuentas e importa tus colecciones. Spotify: inicia sesión para oír las canciones enteras.</p>
       ${['instagram', 'youtube', 'tiktok', 'facebook', 'x'].map((net) => {
         const ig = net === 'instagram';
         const on = ig ? state.instagram?.connected : state.social?.[net]?.connected;
@@ -451,6 +488,7 @@ function mountSettings(root, section) {
           <button class="btn small ${on ? 'ghost' : 'primary'}" ${ig ? 'data-open-panel="instagram"' : `data-open-net="${net}"`}>${on ? 'Abrir' : 'Conectar cuenta'}</button>
         </section>`;
       }).join('')}
+      ${spotifyCard()}
     </section>` },
     { id: 'cloud', label: 'Nube', icon: ICON.cloud, html: `<section class="set-card">
       <h3>Nube</h3>
@@ -472,11 +510,12 @@ function mountSettings(root, section) {
       <div class="set-radios">${OPTS_MODES.map(([k, label]) => `<label><input type="radio" name="optsMode" value="${k}" ${k === optsMode() ? 'checked' : ''}> ${label}</label>`).join('')}</div>
       <p class="hint">Si la ocultas por completo, sus botones (Subir, Mover, Borrar…) no estarán disponibles hasta que la vuelvas a mostrar.</p>
     </section>` },
+    { id: 'keys', label: 'Atajos de teclado', icon: ICON.keys, html: keysPane() },
     { id: 'theme', label: 'Temas', icon: ICON.theme, html: '<section class="set-card" id="themeCard"></section>' },
     { id: 'backup', label: 'Backups', icon: ICON.backup, html: '<section class="set-card" id="backupCard"></section>' },
     { id: 'folder', label: 'Carpeta compartida', icon: ICON.folder, html: folderPane() },
     { id: 'about', label: 'Acerca de', icon: ICON.about, html: aboutPane() },
-  ].filter(Boolean);
+  ].filter(Boolean).map((x) => (globalThis.JR_WEB && WEB_OFF[x.id] ? { ...x, off: true, html: webNote(WEB_OFF[x.id]) + `<div class="web-off">${x.html}</div>` } : x));
 
   const draw = () => {
     const list = sections();
@@ -530,7 +569,7 @@ function mountSettings(root, section) {
     const btn = e.target.closest('button');
     try {
       if (act === 'connect') {
-        window.open('/api/google/login?drive=1', '_blank');
+        globalThis.JR_WEB ? location.assign('api/google/login?drive=1') : window.open('/api/google/login?drive=1', '_blank');
         btn.disabled = true;
         btn.textContent = tr('Esperando el permiso en el navegador…');
         for (let i = 0; i < 150; i++) {

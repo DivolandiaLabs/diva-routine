@@ -179,7 +179,7 @@ export async function restoreDrawings(id) {
  * Se puede bajar el archivo: de su link (yt-dlp, o Instagram con tu cuenta conectada) o, si es
  * de una carpeta compartida, del Drive de quien lo añadió.
  */
-export const canDownload = (v) => Boolean(v.source.drive) || v.source.platform === 'cloud' || (Boolean(v.source.url) && (state.ytdlp || (v.source.platform === 'instagram' && state.instagram.connected)));
+export const canDownload = (v) => v.source.platform !== 'spotify' && (Boolean(v.source.drive) || v.source.platform === 'cloud' || (Boolean(v.source.url) && (state.ytdlp || (v.source.platform === 'instagram' && state.instagram.connected))));
 
 // ---------- compartido con otras personas ----------
 
@@ -421,6 +421,8 @@ const byIdIn = (list) => (id) => state[list].find((x) => x.id === id);
 export const libraryById = byIdIn('libraries');
 export const videoById = byIdIn('videos');
 export const exerciseById = byIdIn('exercises');
+/** El dibujo de una rutina: el de la biblioteca, o la copia que guardó la rutina si ese se borró. */
+export const itemExercise = (it) => exerciseById(it.exerciseId) || (it.snap ? { id: it.exerciseId, ...it.snap } : null);
 export const routineById = byIdIn('routines');
 
 // En el orden que les hayas dado arrastrándolos; los demás, por fecha (al final).
@@ -451,7 +453,116 @@ export function autoOrder(exercises) {
 
 // ---------- miniaturas ----------
 
-export const PLATFORM = { instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', x: 'X', vimeo: 'Vimeo', web: 'Link', local: 'Archivo' , cloud: 'Nube' };
+export const PLATFORM = { instagram: 'Instagram', youtube: 'YouTube', tiktok: 'TikTok', x: 'X', vimeo: 'Vimeo', web: 'Link', local: 'Archivo' , cloud: 'Nube', spotify: 'Spotify' };
+/** Audio: un archivo de música o un link de Spotify (canción, álbum o playlist). */
+export const isAudio = (v) => v?.source?.mediaType === 'audio' || v?.source?.platform === 'spotify';
+/**
+ * Reproductor de Spotify en el elemento el: lo pone solo si Spotify deja verlo sin cuenta. Si no (lista
+ * personal o privada), explica por qué y deja abrirla en Spotify.
+ */
+export async function mountSpotify(el, url) {
+  el.innerHTML = '<p class="hint">Cargando Spotify…</p>';
+  // Devuelve un objeto que se usa como un <video> (duration, currentTime, play, pause y sus eventos),
+  // o null si Spotify no deja ver ese link.
+  let info = { ok: null };
+  try {
+    info = await api.spotifyCheck(url);
+  } catch {
+    /* sin respuesta: se intenta igual */
+  }
+  if (info.ok === false) {
+    el.innerHTML = `<div class="spotify-off"><p><b>Spotify no deja reproducir esta lista dentro de la app.</b></p><p>Es una lista personal (como Daily Mix, Daylist o Blend) o privada: solo la ve tu cuenta.</p>
+      <p class="hint">Si quieres usarla aquí, en Spotify créate una copia pública (en la lista: ⋯ → Añadir a otra lista → Nueva lista, y hazla pública) y pega su link.</p>
+      <a class="btn primary" href="${esc(url)}" target="_blank" rel="noopener">Abrir en Spotify ↗</a></div>`;
+    return null;
+  }
+  el.innerHTML = `<iframe src="${esc(spotifyEmbed(url) || '')}" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy" title="Spotify"></iframe>
+    <div class="sp-ctl">
+      <button class="sp-btn" data-sp="back" title="10 s atrás" aria-label="10 s atrás">⟲ 10</button>
+      <button class="sp-btn sp-main" data-sp="toggle" title="Reproducir" aria-label="Reproducir">▶</button>
+      <button class="sp-btn" data-sp="fwd" title="10 s adelante" aria-label="10 s adelante">10 ⟳</button>
+      <input type="range" class="sp-seek" min="0" max="1000" value="0" aria-label="Posición" disabled>
+      <span class="sp-time">0:00 / 0:00</span>
+    </div>`;
+  return spotifyControls(el);
+}
+
+/**
+ * Controles propios bajo el reproductor de Spotify: play/pausa, ±10 s y barra para saltar. Hablan con
+ * él por mensajes (como su API oficial: «toggle», «seek»…; él avisa con «ready» y «playback_update»).
+ * Spotify no deja cambiar el volumen ni la velocidad desde fuera.
+ */
+function spotifyControls(el) {
+  const frame = el.querySelector('iframe');
+  const btn = el.querySelector('[data-sp="toggle"]');
+  const seek = el.querySelector('.sp-seek');
+  const time = el.querySelector('.sp-time');
+  let pos = 0; // segundos
+  let dur = 0;
+  let paused = true;
+  const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  let ready = false;
+  let started = false; // Spotify no dice la duración hasta que empieza a sonar
+  const queue = [];
+  const post = (msg) => frame.contentWindow?.postMessage(msg, 'https://open.spotify.com');
+  const send = (msg) => (ready ? post(msg) : queue.push(msg));
+  const draw = () => {
+    btn.textContent = paused ? '▶' : '❚❚';
+    btn.title = btn.ariaLabel = tr(paused ? 'Reproducir' : 'Pausa');
+    seek.disabled = !dur;
+    if (document.activeElement !== seek) seek.value = dur ? Math.round((pos / dur) * 1000) : 0;
+    time.textContent = `${clock(pos)} / ${clock(dur)}`;
+  };
+  // Lo que ve el resto de la app: como un <video>, con sus mismos eventos.
+  const media = new EventTarget();
+  const fire = (type) => media.dispatchEvent(new Event(type));
+  Object.defineProperties(media, {
+    duration: { get: () => dur || NaN },
+    paused: { get: () => paused },
+    currentTime: { get: () => pos, set: (t) => ((pos = Math.max(0, t)), send({ command: 'seek', timestamp: pos })) },
+  });
+  // La primera vez «play» (empieza); después «resume» (sigue donde estaba).
+  media.play = () => (paused ? send({ command: started ? 'resume' : 'play' }) : null, Promise.resolve());
+  media.pause = () => !paused && send({ command: 'pause' });
+  const onMessage = (e) => {
+    if (!frame.isConnected) return window.removeEventListener('message', onMessage);
+    if (e.source !== frame.contentWindow || e.origin !== 'https://open.spotify.com') return;
+    const { type, payload } = e.data || {};
+    if (type === 'ready') {
+      ready = true;
+      post({ command: 'load_complete_ack' });
+      queue.splice(0).forEach(post);
+    }
+    if ((type === 'playback_update' || type === 'playback_started') && payload) {
+      const hadDur = dur > 0;
+      const wasPaused = paused;
+      if (Number.isFinite(payload.position)) pos = payload.position / 1000;
+      if (Number.isFinite(payload.duration)) dur = payload.duration / 1000;
+      if (typeof payload.isPaused === 'boolean') paused = payload.isPaused;
+      if (!paused) started = true;
+      draw();
+      if (!hadDur && dur > 0) fire('loadedmetadata');
+      fire('timeupdate');
+      if (wasPaused !== paused) fire(paused ? 'pause' : 'play');
+      if (paused && dur && pos >= dur - 0.5) fire('ended');
+    }
+  };
+  window.addEventListener('message', onMessage);
+  el.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-sp]')?.dataset.sp;
+    if (act === 'toggle') send({ command: 'toggle' });
+    else if (act === 'back' || act === 'fwd') send({ command: 'seek', timestamp: Math.max(0, Math.min(dur || Infinity, pos + (act === 'fwd' ? 10 : -10))) });
+  });
+  seek.addEventListener('change', () => dur && send({ command: 'seek', timestamp: (seek.value / 1000) * dur }));
+  draw();
+  return media;
+}
+/** Reproductor de Spotify incrustado para un link suyo (null si no se reconoce). */
+export function spotifyEmbed(url) {
+  const m = String(url || '').match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(track|album|playlist|episode|show|artist)\/([A-Za-z0-9]+)/i)
+    || String(url || '').match(/^spotify:(track|album|playlist|episode|show|artist):([A-Za-z0-9]+)/i);
+  return m ? `https://open.spotify.com/embed/${m[1].toLowerCase()}/${m[2]}` : null;
+}
 
 /** Dibujo representativo de un ejercicio (el momento clave del medio). */
 export function exerciseFigure(ex, size = 120, opts = {}) {
@@ -474,6 +585,7 @@ export function videoThumb(v) {
   const ph = (label, cover = '') =>
     `<div class="ph ph-${esc(v.source.platform)}"><span>${esc(label)}</span>${cover ? `<img class="ph-cover" src="${esc(cover)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()">` : ''}</div>`;
   if (v.source.mediaType === 'image' && v.source.file) return `<img src="/media/${esc(v.source.file)}" alt="" loading="lazy">`;
+  if (isAudio(v)) return `<div class="ph ph-audio ph-${esc(v.source.platform)}"><span>${v.source.platform === 'spotify' ? 'Spotify' : '♪ Audio'}</span></div>`;
   if (v.poster) return `<img src="/media/${esc(v.poster)}" alt="" loading="lazy">`;
   if (v.source.mediaType === 'video') {
     // Mientras se hace su portada: la del post de Instagram si la hay, o un fondo neutro.
@@ -786,6 +898,19 @@ export function usedInRoutines(exIds) {
     .filter((r) => r.items.some((it) => exIds.includes(it.exerciseId) || it.extra?.some((k) => files.has(k.img))))
     .map((r) => `«${r.name}»`);
   return names.length ? `Está en estas rutinas: ${names.join(', ')}.` : '';
+}
+
+/**
+ * Una fase más para un ejercicio, del fotograma del segundo t: con su viñeta dibujada igual que las
+ * que se sacan de un tramo (no solo la figura de palitos). null si no se ve a nadie.
+ */
+export async function frameKeyframe(videoId, t) {
+  const v = videoById(videoId);
+  const [f] = await posesAt(mediaSrc(v), [t]);
+  if (!f) return null;
+  const keyframes = [{ t: f.t, aspect: Math.round(f.aspect * 1000) / 1000, lms: f.lms, label: labelPose(f.lms, f.aspect) }];
+  await addIllustrations(v, keyframes);
+  return keyframes[0];
 }
 
 /** Modo manual: una viñeta por cada fotograma elegido, en un ejercicio nuevo. */

@@ -1,0 +1,263 @@
+// Reproductor de una clase: todo lo que hay dentro, seguido y en su orden, como una lista.
+// Videos: solo su tramo. Fotos y rutinas: el tiempo elegido en la clase.
+import { esc, toast, libraryById, exerciseById, itemExercise, exerciseFigure, mountSpotify } from './store.js';
+import { classItems, itemType, playable, segmentOf, itemSecs, clock, rememberDuration } from './classtime.js';
+
+export function renderClassPlay(root, id) {
+  const lib = libraryById(id);
+  if (!lib) {
+    root.innerHTML = '<div class="empty-state"><h2>Esta clase ya no existe</h2></div>';
+    return null;
+  }
+  const items = classItems(lib).filter(playable);
+  root.innerHTML = `
+    <div class="cls-play">
+      <header class="cls-head">
+        <a href="#/biblioteca/${lib.id}" class="back">← ${esc(lib.name)}</a>
+        <h2>${esc(lib.name)}</h2>
+        <span class="cls-time"><b id="clsNow">0:00</b> / <span id="clsTotal">…</span></span>
+      </header>
+      <div class="cls-screen" id="clsScreen">
+      <div class="cls-stage" id="clsStage"></div>
+      <div class="cls-overlay">
+      <div class="cls-bar"><div id="clsProgress"></div></div>
+      <div class="cls-controls">
+        <button class="btn" data-cls="prev" title="Elemento anterior (←)">⏮</button>
+        <button class="btn" data-cls="back" title="10 s atrás (Mayús + ←)">⟲10</button>
+        <button class="btn primary" data-cls="toggle" id="clsToggle" title="Pausa">⏸</button>
+        <button class="btn" data-cls="fwd" title="10 s adelante (Mayús + →)">10⟳</button>
+        <button class="btn" data-cls="next" title="Elemento siguiente (→)">⏭</button>
+        <span class="cls-label" id="clsLabel"></span>
+        <select class="cls-speed" id="clsSpeed" title="Velocidad"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+        <label class="cls-vol" title="Volumen">🔊<input type="range" id="clsVol" min="0" max="1" step="0.05" value="1"></label>
+        <button class="btn" data-cls="full" title="Pantalla completa (F)">⛶</button>
+      </div>
+      </div>
+      </div>
+      <ol class="cls-list" id="clsList"></ol>
+    </div>`;
+  const $ = (s) => root.querySelector(s);
+  if (!items.length) {
+    $('#clsStage').innerHTML = '<div class="empty-state"><h2>Esta clase está vacía</h2><p>Añade videos descargados, fotos o rutinas a la clase.</p></div>';
+    $('.cls-controls').hidden = true;
+    return null;
+  }
+
+  let secs = items.map(() => 0); // lo que dura cada cosa en la clase
+  let total = 0;
+  let index = 0;
+  let playing = true;
+  let timer = null; // fotos y rutinas
+  let shownAt = 0; // cuándo empezó a verse (fotos y rutinas)
+  let spent = 0; // lo ya visto de la foto o rutina antes de una pausa
+  let video = null;
+  let segment = null;
+  let gone = false;
+  let finished = false;
+  let volume = 1;
+  let rate = 1; // velocidad: videos, audios, y el tiempo de fotos y rutinas
+
+  const nameOf = (it) => (it.kind === 'routine' ? it.x.name : it.x.title);
+  const before = (i) => secs.slice(0, i).reduce((a, b) => a + b, 0);
+  const elapsedHere = () => (video && segment ? Math.max(0, video.currentTime - segment.start) : spent + (playing && shownAt ? ((Date.now() - shownAt) / 1000) * rate : 0));
+
+  const drawList = () => {
+    $('#clsList').innerHTML = items.map((it, i) => `
+      <li class="${i === index ? 'on' : ''}" data-cls-go="${i}"><span class="cls-n">${i + 1}</span><span class="cls-t">${esc(nameOf(it))}</span><span class="cls-d">${clock(secs[i])}</span></li>`).join('');
+  };
+  const tick = () => {
+    const now = finished ? total : Math.min(total, before(index) + elapsedHere());
+    $('#clsNow').textContent = clock(now);
+    $('#clsProgress').style.width = total ? `${(now / total) * 100}%` : '0';
+  };
+  const clearItem = () => {
+    clearTimeout(timer);
+    timer = null;
+    if (video) video.pause();
+    video = null;
+    segment = null;
+  };
+
+  async function show(i) {
+    clearItem();
+    finished = false;
+    index = Math.max(0, Math.min(items.length - 1, i));
+    spent = 0;
+    shownAt = 0;
+    const it = items[index];
+    const type = itemType(it);
+    $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(it)}`;
+    drawList();
+    const stage = $('#clsStage');
+    if (type === 'video') {
+      segment = await segmentOf(lib, it.x);
+      if (gone || items[index] !== it) return;
+      // Un archivo de audio suena con su nombre en pantalla; un video se ve.
+      stage.innerHTML = it.x.source.mediaType === 'audio'
+        ? `<div class="cls-audio"><span>♪</span><h3>${esc(nameOf(it))}</h3><audio src="/media/${esc(encodeURIComponent(it.x.source.file))}" controls></audio></div>`
+        : `<video src="/media/${esc(encodeURIComponent(it.x.source.file))}" playsinline></video>`;
+      video = stage.querySelector('video, audio');
+      video.playbackRate = rate;
+      video.volume = volume;
+      video.addEventListener('loadedmetadata', () => {
+        video.currentTime = segment.start;
+        video.playbackRate = rate;
+        // Si el sistema no deja reproducir solo, queda en pausa y el botón ▶ lo arranca.
+        if (playing) video.play().catch(() => setPaused());
+      }, { once: true });
+      video.addEventListener('timeupdate', () => {
+        if (video && video.currentTime >= segment.end - 0.05) next();
+      });
+      video.addEventListener('ended', () => next());
+      // Si el archivo no se puede abrir (borrado o movido), se salta a lo siguiente.
+      video.addEventListener('error', () => {
+        toast(`No se pudo reproducir «${nameOf(it)}»: se salta`, 'error');
+        next();
+      }, { once: true });
+      return;
+    }
+    if (type === 'spotify') {
+      // Spotify: su tramo (por defecto la canción entera), como un video; si no arranca solo, con ▶.
+      stage.innerHTML = `<div class="cls-audio"><h3>${esc(nameOf(it))}</h3><div class="spotify-slot"></div><p class="hint">Si no empieza sola, pulsa ▶.</p></div>`;
+      segment = await segmentOf(lib, it.x);
+      const media = await mountSpotify(stage.querySelector('.spotify-slot'), it.x.source.url);
+      if (gone || items[index] !== it) return;
+      if (!media) return; // lista personal o privada: se ve el aviso y se pasa con ⏭
+      video = media;
+      const set = lib.classItems?.[it.x.id] || {};
+      media.addEventListener('loadedmetadata', () => {
+        // Sin fin elegido, la canción entera (la que diga Spotify).
+        if (set.end == null) segment.end = media.duration;
+        rememberDuration(lib, it.x.id, media.duration);
+        if (segment.start) media.currentTime = segment.start;
+      }, { once: true });
+      if (playing) media.play();
+      media.addEventListener('timeupdate', () => {
+        if (video === media && media.currentTime >= segment.end - 0.3) next();
+      });
+      media.addEventListener('ended', () => video === media && next());
+      return;
+    } else if (type === 'image') {
+      stage.innerHTML = `<img src="/media/${esc(encodeURIComponent(it.x.source.file))}" alt="">`;
+    } else {
+      const exs = it.x.items.map((x) => itemExercise(x)).filter(Boolean);
+      stage.innerHTML = `<div class="cls-routine"><h3>${esc(it.x.name)}</h3><div class="cls-routine-grid">${exs.map((e, n) => `
+        <figure><span class="cls-rn">${n + 1}</span>${exerciseFigure(e, 220)}<figcaption>${esc(e.title)}</figcaption></figure>`).join('')}</div></div>`;
+    }
+    if (playing) runTimer();
+  }
+  function runTimer() {
+    shownAt = Date.now();
+    timer = setTimeout(next, Math.max(0, ((secs[index] - spent) * 1000) / rate));
+  }
+  /** Avanza o retrocede dentro del elemento que suena (sin salir de su tramo). */
+  function seek(d) {
+    if (video && segment) {
+      const end = Number.isFinite(segment.end) ? segment.end : video.duration || Infinity;
+      video.currentTime = Math.max(segment.start, Math.min(end - 0.1, video.currentTime + d));
+      return;
+    }
+    spent = Math.max(0, Math.min(secs[index] - 0.1, elapsedHere() + d));
+    clearTimeout(timer);
+    shownAt = 0;
+    if (playing) runTimer();
+    tick();
+  }
+  function setRate(r) {
+    spent = elapsedHere();
+    rate = r;
+    if (video && 'playbackRate' in video) video.playbackRate = r;
+    else if (!video && playing) (clearTimeout(timer), runTimer());
+  }
+  function fullscreen() {
+    const box = root.querySelector('.cls-screen');
+    if (document.fullscreenElement) document.exitFullscreen();
+    else box.requestFullscreen?.().catch(() => {});
+  }
+  function next() {
+    if (index >= items.length - 1) {
+      clearItem();
+      playing = false;
+      finished = true;
+      $('#clsToggle').textContent = '▶';
+      $('#clsNow').textContent = clock(total);
+      $('#clsProgress').style.width = '100%';
+      return toast('Clase terminada');
+    }
+    show(index + 1);
+  }
+  function setPaused() {
+    playing = false;
+    $('#clsToggle').textContent = '▶';
+    $('#clsToggle').title = 'Reproducir';
+  }
+  function toggle() {
+    playing = !playing;
+    $('#clsToggle').textContent = playing ? '⏸' : '▶';
+    $('#clsToggle').title = playing ? 'Pausa' : 'Reproducir';
+    if (video) return playing ? video.play().catch(() => {}) : video.pause();
+    if (playing) runTimer();
+    else {
+      clearTimeout(timer);
+      spent += (Date.now() - shownAt) / 1000;
+      shownAt = 0;
+    }
+  }
+
+  root.addEventListener('click', (e) => {
+    const go = e.target.closest('[data-cls-go]');
+    if (go) return show(+go.dataset.clsGo);
+    const act = e.target.closest('[data-cls]')?.dataset.cls;
+    if (act === 'prev') show(index - 1);
+    else if (act === 'next') next();
+    else if (act === 'back') seek(-10);
+    else if (act === 'fwd') seek(10);
+    else if (act === 'full') fullscreen();
+    else if (act === 'toggle') {
+      // Acabada la clase, el botón vuelve a empezar.
+      if (finished) return (playing = true), ($('#clsToggle').textContent = '⏸'), show(0);
+      toggle();
+    }
+  });
+  const onKey = (e) => {
+    if (e.target.closest?.('input, textarea')) return;
+    if (e.key === ' ') (e.preventDefault(), toggle());
+    else if (e.key === 'ArrowRight') e.shiftKey ? seek(10) : next();
+    else if (e.key === 'ArrowLeft') e.shiftKey ? seek(-10) : show(index - 1);
+    else if (e.key === 'f' || e.key === 'F') fullscreen();
+  };
+  document.addEventListener('keydown', onKey);
+  $('#clsSpeed').addEventListener('change', (e) => setRate(+e.target.value));
+  $('#clsVol').addEventListener('input', (e) => {
+    volume = +e.target.value;
+    if (video && 'volume' in video) video.volume = volume;
+  });
+  // Los controles se esconden si el ratón está quieto (o fuera) y vuelven al moverlo.
+  const screen = $('#clsScreen');
+  let idle = null;
+  const wake = () => {
+    screen.classList.add('awake');
+    clearTimeout(idle);
+    idle = setTimeout(() => !screen.querySelector('.cls-overlay:hover, select:focus') && screen.classList.remove('awake'), 2500);
+  };
+  screen.addEventListener('mousemove', wake);
+  screen.addEventListener('mouseleave', () => (clearTimeout(idle), screen.classList.remove('awake')));
+  const ticker = setInterval(tick, 250);
+
+  Promise.all(items.map((it) => itemSecs(lib, it))).then((list) => {
+    secs = list;
+    total = list.reduce((a, b) => a + b, 0);
+    if (gone) return;
+    $('#clsTotal').textContent = clock(total);
+    show(0); // con las duraciones ya sabidas
+  });
+
+  return () => {
+    gone = true;
+    clearItem();
+    clearInterval(ticker);
+    document.removeEventListener('keydown', onKey);
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  };
+}
+

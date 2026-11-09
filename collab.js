@@ -509,7 +509,13 @@ export function createCollab({ localDir, uploadDir, getDb, saveDb, markSaved, on
       cs.state = 'off';
       return;
     }
+    await google.ensureEmail().catch(() => {});
     const my = me();
+    if (!my) {
+      cs.state = 'error';
+      cs.error = 'Google no dio el correo de tu cuenta. Cierra sesión con Google y vuelve a entrar.';
+      return;
+    }
     if (st.email !== my) st = { email: my, spaces: {} };
     cs.state = 'syncing';
     cs.error = null;

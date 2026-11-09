@@ -1,7 +1,7 @@
 {
   "name": "diva-routine",
   "productName": "Diva Routine",
-  "version": "1.0.87",
+  "version": "1.0.106",
   "description": "Rutinas de entrenamiento de jazz: biblioteca de videos/links, extracción de técnica y tablas visuales",
   "author": "Divolandia",
   "private": true,
@@ -11,7 +11,8 @@
     "start": "node server.js",
     "app": "electron .",
     "instalador": "node desktop/preparar.js && electron-builder --win --publish never",
-    "publicar": "node desktop/preparar.js && electron-builder --win --publish always"
+    "publicar": "node desktop/preparar.js && electron-builder --win --publish always",
+    "web": "node web/build.mjs"
   },
   "engines": {
     "node": ">=18"
@@ -84,8 +85,12 @@
     ]
   },
   "devDependencies": {
+    "buffer": "^6.0.3",
     "electron": "^45.1.0",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "events": "^3.3.0",
+    "path-browserify": "^1.0.1"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

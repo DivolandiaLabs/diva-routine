@@ -1,6 +1,6 @@
 // Buscador de lo importado, para sacar dibujos desde el Creador de rutinas: al elegir un video o
 // una foto se abre su página, que es donde se marcan los tramos.
-import { state, esc, exercisesOf, libraryById, libraryLabel, videoThumb } from './store.js';
+import { state, esc, exercisesOf, libraryById, libraryLabel, videoThumb, isAudio } from './store.js';
 
 const MAX_SHOWN = 200; // con la búsqueda se llega a lo demás
 
@@ -23,7 +23,9 @@ export function openLibraryPicker() {
 
   const found = () => {
     const q = input.value.trim().toLowerCase();
+    // Solo videos y fotos: de un audio (archivo o Spotify) no se sacan dibujos.
     return state.videos
+      .filter((v) => !isAudio(v))
       .filter((v) => !q || `${v.title} ${where(v)}`.toLowerCase().includes(q))
       .sort(newestFirst);
   };

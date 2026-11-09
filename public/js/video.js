@@ -8,8 +8,8 @@ import { tr } from './i18n.js';
 import {
   state, refresh, emit, esc, toast, fmtTime, parseTime, debounce, upsert,
   videoById, libraryById, libraryLabel, libraryChoices, isTop, shelfName, exercisesOf, exerciseById, PLATFORM, CATEGORIES, youtubeId,
-  jobs, queueDownload, queueAnalysis, isAnalyzing, manualExtract, canDownload, removeVideos, ui,
-  usedInRoutines, foldedAi, ask, styleTiles, modelPicker, chooseAi, framesExtract, imageExtract, improveWithAi, CROWN,
+  jobs, queueDownload, queueAnalysis, isAnalyzing, manualExtract, canDownload, removeVideos, ui, isAudio, spotifyEmbed, mountSpotify,
+  usedInRoutines, foldedAi, ask, styleTiles, modelPicker, chooseAi, framesExtract, imageExtract, improveWithAi, CROWN, frameKeyframe,
 } from './store.js';
 
 function embedUrl(src) {
@@ -21,6 +21,7 @@ function embedUrl(src) {
   if (src.platform === 'youtube' && youtubeId(url)) return `https://www.youtube.com/embed/${youtubeId(url)}`;
   if (src.platform === 'tiktok' && (m = url.match(/video\/(\d+)/))) return `https://www.tiktok.com/embed/v2/${m[1]}`;
   if (src.platform === 'vimeo' && (m = url.match(/vimeo\.com\/(\d+)/))) return `https://player.vimeo.com/video/${m[1]}`;
+  if (src.platform === 'spotify') return spotifyEmbed(url);
   return null;
 }
 
@@ -36,6 +37,7 @@ export function renderVideo(root, id) {
   }
   const isVideo = v.source.mediaType === 'video';
   const isImage = v.source.mediaType === 'image';
+  const audio = isAudio(v); // archivo de música o Spotify: se escucha, no se sacan dibujos
   const lib = libraryById(v.libraryId);
   const embed = !v.source.file ? embedUrl(v.source) : null;
 
@@ -54,8 +56,10 @@ export function renderVideo(root, id) {
     <div class="vgrid">
       <section class="vplayer-col">
         <div class="player ${embed ? 'embed' : ''}">
-          ${isVideo ? `<video id="video" controls controlslist="noplaybackrate" playsinline preload="auto" src="/media/${esc(v.source.file)}"></video>`
+          ${audio && v.source.file ? `<audio id="audio" controls preload="metadata" src="/media/${esc(v.source.file)}"></audio>`
+            : isVideo ? `<video id="video" controls controlslist="noplaybackrate" playsinline preload="auto" src="/media/${esc(v.source.file)}"></video>`
             : isImage ? `<img id="photo" src="/media/${esc(v.source.file)}" alt="">`
+            : v.source.platform === 'spotify' ? '<div class="spotify-slot" id="spotifySlot"></div>'
             : embed ? `<iframe src="${esc(embed)}" allowfullscreen loading="lazy" title="Video original"></iframe>`
             : `<div class="ph big ph-${esc(v.source.platform)}"><span>${esc(PLATFORM[v.source.platform] || 'Link')}</span></div>`}
         </div>
@@ -65,7 +69,7 @@ export function renderVideo(root, id) {
           <div class="timeline-box">
             <div class="tl" id="tl" tabindex="0" aria-label="Timeline: arrastra para elegir el tramo del ejercicio">
               <div class="tl-strip" id="strip"></div>
-              <div class="tl-sel" id="sel"><span class="tl-h" data-h="start" title="Inicio"></span><span class="tl-h" data-h="end" title="Fin"></span></div>
+              <div class="tl-sel" id="sel"><span class="tl-grab" data-h="move" title="Arrastra para mover el tramo entero (mismo tamaño)"></span><span class="tl-h" data-h="start" title="Inicio"></span><span class="tl-h" data-h="end" title="Fin"></span></div>
               <div class="tl-play" id="play"></div>
             </div>
             <div class="tl-lane" id="lane" title="Ejercicios ya extraídos: clic para cargar su tramo"></div>
@@ -105,7 +109,7 @@ export function renderVideo(root, id) {
               <label class="sp-count"><span>Fotogramas</span><input type="range" id="spCount" min="2" max="12" step="1" value="6" aria-label="Número de fotogramas"><b id="spCountN">6</b></label>
             </div>
           </div>` : ''}
-        ${v.source.file ? `
+        ${v.source.file && !audio ? `
           <div class="extract">
             ${isVideo ? `<button class="btn primary" data-act="make-frames" data-only="manual" id="mkFrames" disabled>Crear viñetas</button>
               <button class="btn primary" data-act="process-seg" data-only="auto">Procesar este tramo</button>
@@ -136,7 +140,14 @@ export function renderVideo(root, id) {
     </div>`;
 
   const $ = (s) => root.querySelector(s);
+  if ($('#spotifySlot')) mountSpotify($('#spotifySlot'), v.source.url);
   const video = $('#video');
+  // Versión web: si el video (desde Drive) no carga, enseñar por qué.
+  if (globalThis.JR_WEB && video) video.addEventListener('error', async () => {
+    const r = await fetch(video.currentSrc || video.src, { headers: { Range: 'bytes=0-1' } }).catch((e) => ({ ok: false, statusText: e.message }));
+    const msg = r.ok ? `formato no compatible (${r.headers?.get('Content-Type') || '?'})` : (await r.json?.().catch(() => null))?.error || `${r.status || ''} ${r.statusText || ''}`;
+    toast(`${tr('No se pudo cargar el video')}: ${msg}`, 'error');
+  }, { once: true });
   // Velocidad: se recuerda la última elegida para todos los videos.
   if (video) {
     const speed = $('#speed');
@@ -166,7 +177,7 @@ export function renderVideo(root, id) {
 
   const drawNoFile = () => {
     const box = $('#nofile');
-    if (v.source.file) return (box.innerHTML = '');
+    if (v.source.file || audio) return (box.innerHTML = ''); // Spotify no se descarga: se escucha aquí
     const downloading = jobs.downloading === v.id || jobs.downloads.includes(v.id);
     box.innerHTML = `
       <div class="callout">
@@ -414,6 +425,7 @@ export function renderVideo(root, id) {
       $('#tl').setPointerCapture(e.pointerId);
       const t0 = xToT(e.clientX);
       const handle = e.target.dataset?.h;
+      const from = tl.sel ? { ...tl.sel } : null; // para mover el tramo entero
       let moved = false;
       const onMove = (ev) => {
         const t = xToT(ev.clientX);
@@ -421,7 +433,12 @@ export function renderVideo(root, id) {
         moved = true;
         if (handle === 'start') setSel(Math.min(t, tl.sel.end - 0.1), tl.sel.end, { seekTo: t });
         else if (handle === 'end') setSel(tl.sel.start, Math.max(t, tl.sel.start + 0.1), { seekTo: t });
-        else setSel(Math.min(t0, t), Math.max(t0, t), { seekTo: t });
+        else if (handle === 'move' && from) {
+          // El tramo entero se desliza con el mismo tamaño, sin salirse del video.
+          const len = from.end - from.start;
+          const start = Math.max(0, Math.min(tl.duration - len, from.start + (t - t0)));
+          setSel(start, start + len, { seekTo: start });
+        } else setSel(Math.min(t0, t), Math.max(t0, t), { seekTo: t });
       };
       const onUp = () => {
         $('#tl').removeEventListener('pointermove', onMove);
@@ -557,8 +574,8 @@ export function renderVideo(root, id) {
           <div class="excard-head">
             <span class="num">${i + 1}</span>
             <input class="ex-title" data-f="title" value="${esc(e.title)}" aria-label="Nombre del ejercicio">
+            <button class="ex-x" data-act="ex-del" title="Eliminar este ejercicio" aria-label="Eliminar">✕</button>
           </div>
-          ${isVideo ? `<button class="range" data-load="${e.id}" title="Cargar este tramo en el timeline">${fmtTime(e.start)} → ${fmtTime(e.end)}</button>` : ''}
           ${e.keyframes?.length ? `<div class="kf-row">${phasesSVG(e.keyframes, { size: 104 }).map((ph, j) => `
             <figure class="kf" data-k="${j}">
               <button class="kf-fig" data-act="seek-kf" title="${isVideo ? 'Ver este momento' : ''}">${ph.svg}</button>
@@ -567,10 +584,9 @@ export function renderVideo(root, id) {
             </figure>`).join('')}</div>`
             : `<p class="hint pending">Tramo marcado: sus dibujos se sacan al crear la rutina.</p>`}
           <div class="row wrap ex-tools">
-            ${isVideo ? `<button class="btn small" data-act="ex-reextract" title="Cambia el tramo de este ejercicio por el que está marcado ahora en el timeline">Usar tramo del timeline</button>` : ''}
+            ${e.keyframes?.some((k) => k.img) ? `<button class="btn small" data-act="ex-ai" title="Vuelve a dibujar con IA todos los dibujos de esta secuencia, con el estilo elegido (puedes volver a los originales)">${CROWN} Regenerar secuencia con IA</button>` : ''}
             ${isVideo && !e.keyframes?.length ? '<button class="btn small ghost" data-act="ex-extract" title="Saca ya los dibujos de este tramo, sin esperar a crear la rutina">Sacar dibujos ahora</button>' : ''}
-            ${isVideo && e.keyframes?.length ? '<button class="btn small ghost" data-act="ex-frame" title="Añade el fotograma actual del video como fase">+ Fotograma actual</button>' : ''}
-            <button class="btn small ghost danger" data-act="ex-del">Eliminar</button>
+            ${isVideo && e.keyframes?.length ? '<button class="btn small ghost" data-act="ex-frame" title="Añade a la secuencia un dibujo más, sacado del fotograma que se ve ahora en el video">+ Dibujo del fotograma actual</button>' : ''}
           </div>
           <details class="ex-details">
             <summary>Técnica y categoría</summary>
@@ -786,6 +802,17 @@ export function renderVideo(root, id) {
       ui.returnToDraw = null;
       ui.openPanel = 'draw';
       history.length > 1 ? history.back() : (location.hash = '#/biblioteca');
+    } else if (act === 'ex-ai' && ex) {
+      // Toda la secuencia de la casilla, dibujo a dibujo, con el estilo de IA elegido.
+      busyManual = { p: 0 };
+      drawProgress();
+      try {
+        await improveWithAi(ex, (i, total) => ((busyManual = { p: (i - 1) / total }), drawProgress()));
+      } finally {
+        busyManual = false;
+        drawProgress();
+        drawExercises();
+      }
     } else if (act === 'ex-reextract') {
       if (!tl.sel) return toast('Marca primero el tramo en el timeline', 'error');
       // Un tramo aún sin dibujos solo cambia de tiempos; uno con dibujos se vuelve a sacar.
@@ -819,23 +846,36 @@ export function renderVideo(root, id) {
       drawExercises();
     } else if (act === 'ex-frame' && ex) {
       video.pause();
+      // La fase nueva con su viñeta, del mismo estilo que las sacadas del tramo.
+      busyManual = { p: 0.3 };
+      drawProgress();
       try {
-        const pose = await detectPose(video);
-        if (!pose) return toast('No se detecta a la persona en este fotograma', 'error');
-        const k = { t: Math.round(video.currentTime * 100) / 100, ...pose, label: labelPose(pose.lms, pose.aspect) };
-        saveExercise(ex.id, { keyframes: [...ex.keyframes, k].sort((a, b) => a.t - b.t), mode: 'manual' });
+        const k = await frameKeyframe(v.id, Math.round(video.currentTime * 100) / 100);
+        if (!k) return toast('No se detecta a la persona en este fotograma', 'error');
+        const keyframes = [...ex.keyframes, k].sort((a, b) => a.t - b.t);
+        const saved = upsert('exercises', await api.updateExercise(ex.id, { keyframes, mode: 'manual' }));
         drawExercises();
+        // Si las otras fases están redibujadas con IA, la nueva también (solo esa).
+        const style = state.ai?.styles.find((x) => x.id === state.ai.style);
+        if (ex.keyframes.some((x) => x.origImg) && k.img && style && !style.free && state.ai.premium) {
+          const i = saved.keyframes.findIndex((x) => x.t === k.t && x.img === k.img);
+          if (i >= 0) await improveWithAi(saved, () => {}, [{ ex: saved, i }]);
+          drawExercises();
+        }
       } catch (err) {
         toast(err.message, 'error');
+      } finally {
+        busyManual = false;
+        drawProgress();
       }
     } else if (act === 'ex-del' && ex) {
-      if (!await ask(`¿Eliminar el ejercicio «${ex.title}»? También se quitará de las rutinas. ${tr(usedInRoutines([ex.id]))}`)) return;
+      if (!await ask(`¿Eliminar el ejercicio «${ex.title}»? Las rutinas donde está lo conservan. ${tr(usedInRoutines([ex.id]))}`)) return;
       await api.deleteExercise(ex.id);
       await refresh();
       drawExercises();
     } else if (act === 'ex-del-all') {
       const n = exercisesOf(v.id).length;
-      if (!await ask(`¿Borrar los ${n} ejercicios de este video? También saldrán de las rutinas. El video se queda.`)) return;
+      if (!await ask(`¿Borrar los ${n} ejercicios de este video? Las rutinas donde están los conservan. El video se queda.`)) return;
       await api.deleteExercisesOf(v.id);
       await refresh();
       activeId = null;
@@ -844,7 +884,7 @@ export function renderVideo(root, id) {
       queueDownload([v.id]);
       drawNoFile();
     } else if (act === 'del-video') {
-      if (!await ask(`¿Eliminar «${v.title}» y sus ejercicios? También se quitarán de las rutinas.`)) return;
+      if (!await ask(`¿Eliminar «${v.title}» y sus ejercicios? Las rutinas donde están los conservan.`)) return;
       await removeVideos([v.id]);
       location.hash = `#/biblioteca/${v.libraryId}`;
     }

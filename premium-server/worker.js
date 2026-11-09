@@ -10,6 +10,9 @@ import { callEngine } from './engines.js';
 
 const LS_API = 'https://api.lemonsqueezy.com/v1/licenses';
 const TOKENINFO = 'https://oauth2.googleapis.com/tokeninfo';
+const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
+// La versión web de la app (y pruebas en este ordenador) pueden llamar desde el navegador.
+const WEB_ORIGIN = /^(https:\/\/divolandialabs\.github\.io|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)$/;
 
 const MAX_IMAGE = 4_000_000; // caracteres en base64
 const MAX_REFS = 4;
@@ -212,9 +215,23 @@ async function publicGet(path, env) {
   return new Response(image, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' } });
 }
 
-export default {
-  async fetch(request, env) {
-    if (request.method === 'GET') return publicGet(new URL(request.url).pathname, env);
+// Inicio de sesión con Google de la versión web: el navegador no puede guardar el secreto del
+// cliente OAuth, así que el canje del código (y la renovación) pasa por aquí, que lo añade.
+// Solo para el cliente web de Diva Routine y solo esos dos tipos de canje.
+async function googleToken(request, env) {
+  const form = new URLSearchParams(await request.text());
+  if (!env.GOOGLE_WEB_CLIENT_ID || !env.GOOGLE_WEB_SECRET) return json(503, { error: 'not_configured', error_description: 'El inicio de sesión de la versión web aún no está configurado.' });
+  if (form.get('client_id') !== env.GOOGLE_WEB_CLIENT_ID) return json(400, { error: 'invalid_client' });
+  if (!['authorization_code', 'refresh_token'].includes(form.get('grant_type'))) return json(400, { error: 'unsupported_grant_type' });
+  form.set('client_secret', env.GOOGLE_WEB_SECRET);
+  const res = await fetch(GOOGLE_TOKEN, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+  return new Response(res.body, { status: res.status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
+}
+
+async function handle(request, env) {
+    const { pathname } = new URL(request.url);
+    if (request.method === 'POST' && pathname === '/google/token') return googleToken(request, env);
+    if (request.method === 'GET') return publicGet(pathname, env);
     if (request.method !== 'POST') return json(405, { error: 'Solo POST.' });
     try {
       const body = await request.json().catch(() => null);
@@ -224,5 +241,21 @@ export default {
       if (!e.status) console.error(e);
       return json(e.status || 500, { error: e.status ? e.message : 'Error interno.' });
     }
+}
+
+export default {
+  async fetch(request, env) {
+    const origin = request.headers.get('Origin') || '';
+    const web = WEB_ORIGIN.test(origin);
+    if (request.method === 'OPTIONS') {
+      if (!web) return new Response(null, { status: 403 });
+      return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, POST', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Max-Age': '86400', Vary: 'Origin' } });
+    }
+    const res = await handle(request, env);
+    if (!web) return res;
+    const out = new Response(res.body, res);
+    out.headers.set('Access-Control-Allow-Origin', origin);
+    out.headers.append('Vary', 'Origin');
+    return out;
   },
 };

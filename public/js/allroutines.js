@@ -1,7 +1,7 @@
 // Todas las rutinas desplegadas en una sola página, con buscador, orden y modos de vista.
 import { phasesSVG } from './figure.js';
 import { api } from './api.js';
-import { state, esc, exerciseById, videoById, fmtTime, CATEGORIES, upsert, removeRoutine, refresh, toast, ask } from './store.js';
+import { state, esc, exerciseById, itemExercise, videoById, fmtTime, CATEGORIES, upsert, removeRoutine, refresh, toast, ask } from './store.js';
 import { lang, tr } from './i18n.js';
 import { SORT_ICON } from './views.js';
 import { normalizeTableStyle } from './routine-styles.js';
@@ -46,7 +46,7 @@ const remember = (key, v) => {
 };
 
 // Los ejercicios de la rutina con lo que se editó en ella (textos y orden de viñetas).
-const itemsOf = (r) => r.items.map((it) => ({ it, e: exerciseById(it.exerciseId) })).filter((x) => x.e);
+const itemsOf = (r) => r.items.map((it) => ({ it, e: itemExercise(it) })).filter((x) => x.e);
 const categoryOf = (r) => itemsOf(r).map((x) => x.it.catLabel ?? x.e.category).find(Boolean) || '';
 const phases = ({ it, e }) => {
   const frames = [...(e.keyframes || []), ...(it.extra || [])];

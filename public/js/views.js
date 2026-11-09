@@ -9,9 +9,9 @@ export const VIEW_ICON = {
   details: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 5h18M3 10h18M3 15h18M3 20h18M10 3v19"/></svg>',
 };
 
+// Sin «muy grandes» ni «detalles»: quien las tenía guardadas vuelve a la de siempre.
 export const VIEWS = [
-  ['xl', 'Iconos muy grandes'], ['l', 'Iconos grandes'], ['m', 'Iconos medianos'],
-  ['s', 'Iconos pequeños'], ['list', 'Lista'], ['details', 'Detalles'],
+  ['l', 'Iconos grandes'], ['m', 'Iconos medianos'], ['s', 'Iconos pequeños'], ['list', 'Lista'],
 ];
 
 export const viewButtons = () => VIEWS.map(([k, label]) => `<button class="view-btn" data-view="${k}" title="${label} (Ctrl + rueda del ratón para cambiar)" aria-label="${label}">${VIEW_ICON[k]}</button>`).join('');

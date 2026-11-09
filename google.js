@@ -32,16 +32,35 @@ const DRIVE_READ = 'https://www.googleapis.com/auth/drive.readonly';
 let CLIENT_FILE;
 let FIREBASE_FILE;
 let TOKEN_FILE;
+let PENDING_FILE;
 let client = null; // { client_id, client_secret }
 let firebase = null; // { apiKey, projectId }
 let identity = null; // { token, until }: id_token reciente
 let tokens = null; // { access_token, refresh_token, expires_at, email, fb: { idToken, refreshToken, expiresAt, uid }, shareFolder }
 const pending = new Map(); // state -> { verifier, redirect, at }
+// También en disco: en la versión web el servidor (un service worker) puede pararse mientras
+// estás en la página de Google, y al volver hay que recordar el inicio de sesión a medias.
+function readPending() {
+  if (pending.size || !PENDING_FILE) return;
+  try {
+    for (const [k, v] of Object.entries(JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8')))) pending.set(k, v);
+  } catch {
+    /* no hay ninguno */
+  }
+}
+const savePending = () => {
+  try {
+    fs.writeFileSync(PENDING_FILE, JSON.stringify(Object.fromEntries(pending)));
+  } catch {
+    /* solo es una ayuda */
+  }
+};
 
 export function initGoogle({ clientFile, firebaseFile, localDir }) {
   CLIENT_FILE = clientFile;
   FIREBASE_FILE = firebaseFile;
   TOKEN_FILE = path.join(localDir, 'google.json');
+  PENDING_FILE = path.join(localDir, 'google-pending.json');
   try {
     client = JSON.parse(fs.readFileSync(CLIENT_FILE, 'utf8'));
   } catch {
@@ -191,8 +210,10 @@ export function loginUrl(redirect, { drive = false } = {}) {
   const verifier = b64url(crypto.randomBytes(32));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
   const state = b64url(crypto.randomBytes(16));
+  readPending();
   pending.set(state, { verifier, redirect, at: Date.now() });
   for (const [k, v] of pending) if (Date.now() - v.at > 15 * 60000) pending.delete(k);
+  savePending();
   const q = new URLSearchParams({
     client_id: client.client_id,
     redirect_uri: redirect,
@@ -208,7 +229,7 @@ export function loginUrl(redirect, { drive = false } = {}) {
   return `${AUTH_URL}?${q}`;
 }
 
-export const isPendingState = (state) => pending.has(state);
+export const isPendingState = (state) => (readPending(), pending.has(state));
 
 async function tokenRequest(params) {
   let res;
@@ -224,9 +245,11 @@ async function tokenRequest(params) {
 
 /** Vuelta de Google: cambia el código por la sesión y la guarda. */
 export async function finishLogin(code, state) {
+  readPending();
   const p = pending.get(state);
   if (!p) throw Object.assign(new Error('Ese inicio de sesión caducó; vuelve a intentarlo.'), { status: 400 });
   pending.delete(state);
+  savePending();
   const t = await tokenRequest({
     client_id: client.client_id,
     client_secret: client.client_secret,
@@ -235,12 +258,7 @@ export async function finishLogin(code, state) {
     redirect_uri: p.redirect,
     grant_type: 'authorization_code',
   });
-  let email = null;
-  try {
-    email = JSON.parse(Buffer.from(t.id_token.split('.')[1], 'base64url').toString()).email || null;
-  } catch {
-    /* sin correo: solo es para mostrarlo */
-  }
+  const email = emailOf(t.id_token);
   if (!t.refresh_token) throw gError('Google no dio permiso para seguir sincronizando. Vuelve a intentarlo.');
   tokens = { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in - 60) * 1000, email, scope: t.scope || '' };
   await saveTokens();
@@ -270,11 +288,28 @@ export async function logout() {
 async function refreshGoogle() {
   const t = await tokenRequest({ client_id: client.client_id, client_secret: client.client_secret, refresh_token: tokens.refresh_token, grant_type: 'refresh_token' });
   tokens = { ...tokens, access_token: t.access_token, expires_at: Date.now() + (t.expires_in - 60) * 1000 };
+  if (!tokens.email) tokens.email = emailOf(t.id_token); // sesiones que entraron sin él (versión web antigua)
   await saveTokens();
   return t;
 }
 
+/** El correo de la cuenta, del id_token de Google. (A mano de base64url a base64: el Buffer de la
+ * versión web no conoce «base64url».) Con él se buscan tus espacios compartidos. */
+function emailOf(idToken) {
+  try {
+    const b64 = idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(Buffer.from(b64, 'base64').toString()).email || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Prueba de qué cuenta es, para el servidor Premium. A diferencia del access_token, no da acceso a Drive. */
+/** Si la sesión no sabe aún su correo, se lo pide a Google (sin volver a iniciar sesión). */
+export async function ensureEmail() {
+  if (tokens?.refresh_token && !tokens.email) await refreshGoogle();
+}
+
 export async function identityToken() {
   if (!tokens?.refresh_token) return null;
   if (Date.now() < (identity?.until ?? 0)) return identity.token;
@@ -348,6 +383,18 @@ export async function listFiles() {
     page = data.nextPageToken || '';
   } while (page);
   return out;
+}
+
+/** Un archivo de la carpeta de la app tal cual llega de Drive (con Range: solo ese trozo). Para ver videos sin bajarlos. */
+const sizes = new Map();
+/** Tamaño de un archivo de Drive (para responder a trozos: el navegador no deja leer Content-Range). */
+export async function driveSize(id) {
+  if (!sizes.has(id)) sizes.set(id, Number((await (await drive(`/drive/v3/files/${id}?fields=size`)).json()).size) || 0);
+  return sizes.get(id);
+}
+
+export async function driveMedia(id, range) {
+  return drive(`/drive/v3/files/${id}?alt=media`, range ? { headers: { Range: range } } : {});
 }
 
 export async function downloadText(id) {
