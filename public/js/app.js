@@ -300,13 +300,13 @@ function drawGoogle(g, c) {
   if (el.hidden) return;
   if (!gOn || (g.state !== 'error' && cErr)) {
     el.classList.add('err');
-    el.textContent = '⚠ No se pudo sincronizar lo compartido';
+    el.innerHTML = '<span>⚠ No se pudo sincronizar lo compartido</span>';
     el.title = c.error || '';
     return;
   }
   el.classList.toggle('err', g.state === 'error');
   const p = g.progress;
-  el.textContent = g.state === 'error' ? '⚠ No se pudo sincronizar con Google' : `☁ Sincronizando con Google${p?.total ? ` (${p.done + 1}/${p.total})` : '…'}`;
+  el.innerHTML = `<span>${g.state === 'error' ? '⚠ No se pudo sincronizar con Google' : `☁ Sincronizando con Google${p?.total ? ` (${p.done + 1}/${p.total})` : '…'}`}</span>`;
   el.title = g.state === 'error' ? g.error || '' : 'Sincronizando con tu Google Drive';
 }
 

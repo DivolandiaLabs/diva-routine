@@ -1,6 +1,7 @@
 // Reproductor de una clase: todo lo que hay dentro, seguido y en su orden, como una lista.
 // Videos: solo su tramo. Fotos y rutinas: el tiempo elegido en la clase.
-import { esc, toast, libraryById, exerciseById, itemExercise, exerciseFigure, mountSpotify } from './store.js';
+import { esc, toast, upsert, libraryById, exerciseById, itemExercise, exerciseFigure, mountSpotify } from './store.js';
+import { api } from './api.js';
 import { classItems, itemType, playable, segmentOf, itemSecs, clock, rememberDuration } from './classtime.js';
 
 export function renderClassPlay(root, id) {
@@ -63,7 +64,7 @@ export function renderClassPlay(root, id) {
 
   const drawList = () => {
     $('#clsList').innerHTML = items.map((it, i) => `
-      <li class="${i === index ? 'on' : ''}" data-cls-go="${i}"><span class="cls-n">${i + 1}</span><span class="cls-t">${esc(nameOf(it))}</span><span class="cls-d">${clock(secs[i])}</span></li>`).join('');
+      <li class="${i === index ? 'on' : ''}" data-cls-go="${i}" title="Mantén pulsado y arrastra para cambiar el orden"><span class="cls-n">${i + 1}</span><span class="cls-t">${esc(nameOf(it))}</span><span class="cls-d">${clock(secs[i])}</span></li>`).join('');
   };
   const tick = () => {
     const now = finished ? total : Math.min(total, before(index) + elapsedHere());
@@ -204,6 +205,95 @@ export function renderClassPlay(root, id) {
     }
   }
 
+  // ---------- Reordenar la lista: mantener pulsado (dedo o ratón) y arrastrar arriba o abajo ----------
+  const HOLD_MS = 400;
+  const SLOP = 8;
+  let hold = null; // { li, x, y, timer }
+  let lift = null; // { li, from }
+  let swallow = false;
+  const list = $('#clsList');
+  const pressStart = (li, x, y) => {
+    clearTimeout(hold?.timer);
+    hold = { li, x, y, timer: setTimeout(() => {
+      lift = { li, from: [...list.children].indexOf(li) };
+      hold = null;
+      li.classList.add('lifted');
+      list.classList.add('sorting');
+      navigator.vibrate?.(15);
+    }, HOLD_MS) };
+  };
+  const pressMove = (x, y) => {
+    if (hold && Math.hypot(x - hold.x, y - hold.y) > SLOP) (clearTimeout(hold.timer), (hold = null));
+    if (!lift) return;
+    // El elemento levantado se coloca donde está el dedo, entre los demás.
+    const others = [...list.children].filter((el) => el !== lift.li);
+    const after = others.find((el) => {
+      const r = el.getBoundingClientRect();
+      return y < r.top + r.height / 2;
+    });
+    if (after) { if (lift.li.nextElementSibling !== after) list.insertBefore(lift.li, after); }
+    else if (list.lastElementChild !== lift.li) list.append(lift.li);
+    // Cerca de los bordes de la pantalla, la página se desplaza sola.
+    if (y < 80) window.scrollBy(0, -12);
+    else if (y > innerHeight - 80) window.scrollBy(0, 12);
+  };
+  const pressEnd = () => {
+    if (hold) (clearTimeout(hold.timer), (hold = null));
+    if (!lift) return;
+    const { li, from } = lift;
+    lift = null;
+    li.classList.remove('lifted');
+    list.classList.remove('sorting');
+    swallow = true;
+    setTimeout(() => (swallow = false), 300);
+    const to = [...list.children].indexOf(li);
+    if (to !== from) reorder(from, to);
+  };
+  async function reorder(from, to) {
+    const playingNow = items[index];
+    const [it] = items.splice(from, 1);
+    items.splice(to, 0, it);
+    const [s] = secs.splice(from, 1);
+    secs.splice(to, 0, s);
+    index = items.indexOf(playingNow);
+    $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(items[index])}`;
+    drawList();
+    // Se guarda como el orden de la clase («Mi orden»); lo que no se puede reproducir conserva su hueco.
+    const queue = [...items];
+    const full = classItems(lib).map((x) => (playable(x) ? queue.shift() : x)).map((x) => ({ kind: x.kind, id: x.x.id }));
+    try {
+      const r = await api.orderItems(full, lib.id);
+      r.videos.forEach((v) => upsert('videos', v));
+      r.routines.forEach((x) => upsert('routines', x));
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+  list.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || e.button !== 0) return; // el dedo va por los eventos táctiles
+    const li = e.target.closest('li');
+    if (li) pressStart(li, e.clientX, e.clientY);
+  });
+  const onPointerMove = (e) => e.pointerType !== 'touch' && pressMove(e.clientX, e.clientY);
+  const onPointerUp = (e) => e.pointerType !== 'touch' && pressEnd();
+  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointerup', onPointerUp);
+  list.addEventListener('touchstart', (e) => {
+    const li = e.target.closest('li');
+    if (li && e.touches.length === 1) pressStart(li, e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  list.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (lift) e.preventDefault(); // con algo levantado, la página no se desplaza con el dedo
+    pressMove(t.clientX, t.clientY);
+  }, { passive: false });
+  list.addEventListener('touchend', pressEnd);
+  list.addEventListener('touchcancel', pressEnd);
+  list.addEventListener('contextmenu', (e) => e.preventDefault()); // ni el menú del navegador al mantener pulsado
+  root.addEventListener('click', (e) => {
+    if (swallow) return (swallow = false), e.preventDefault(), e.stopPropagation();
+  }, true);
+
   root.addEventListener('click', (e) => {
     const go = e.target.closest('[data-cls-go]');
     if (go) return show(+go.dataset.clsGo);
@@ -257,6 +347,8 @@ export function renderClassPlay(root, id) {
     clearItem();
     clearInterval(ticker);
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   };
 }

@@ -402,6 +402,7 @@ function makeSyncer(tag, P) {
   let remoteVersion = null; // versión del db.json remoto que ya está juntada aquí
   let pushed = null; // los datos que se subieron la última vez
   let active = null; // la vuelta en curso
+  let fails = 0; // vueltas seguidas que fallaron (en el móvil, la red se corta a menudo un momento)
   let queued = null; // la siguiente, si se pidió otra mientras tanto
   let timer = null;
   function sync() {
@@ -429,8 +430,8 @@ function makeSyncer(tag, P) {
   }
   const info = () => ({ ...st, state: P.connected() ? st.state : 'off' });
   async function run() {
+    const was = st.state;
     st.state = 'syncing';
-    st.error = null;
     try {
       const files = await P.listFiles();
       const remoteDb = files.get('db.json');
@@ -517,12 +518,17 @@ function makeSyncer(tag, P) {
       }
 
       st.state = 'idle';
+      st.error = null;
       st.last = now();
       st.progress = null;
+      fails = 0;
     } catch (e) {
-      st.state = 'error';
-      st.error = e.message;
+      // Un corte suelto (el móvil se duerme, cambia de wifi a datos…) no es un fallo: se reintenta en
+      // la próxima vuelta sin avisar. Solo se avisa si falla varias veces seguidas o hay que volver a entrar.
+      fails++;
       st.progress = null;
+      st.error = e.message;
+      st.state = e.auth || fails >= 3 ? 'error' : was === 'error' ? 'error' : 'idle';
       console.error(`[${tag}]`, e.message);
     }
 }

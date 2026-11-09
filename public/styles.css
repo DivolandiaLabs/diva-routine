@@ -1564,3 +1564,39 @@ dialog.cls-dlg h3 { padding-right: 36px; }
   .topbar nav::-webkit-scrollbar { display: none; }
   .topbar nav a { flex: none; padding: 6px 10px; white-space: nowrap; }
 }
+
+/* Clase en el móvil: los controles van debajo de la pantalla, siempre visibles, y caben en el ancho. */
+@media (max-width: 640px) {
+  .cls-screen:not(:fullscreen) .cls-overlay { position: static; opacity: 1; pointer-events: auto; padding: 10px 10px 12px; background: #111; }
+  .cls-screen:not(:fullscreen) { cursor: auto; }
+  .cls-play { grid-template-columns: minmax(0, 1fr); }
+  .cls-screen, .cls-overlay, .cls-controls { min-width: 0; max-width: 100%; }
+  .cls-stage { min-height: 40vh; max-height: 60vh; }
+  .cls-controls { flex-wrap: wrap; justify-content: center; gap: 6px; }
+  .cls-controls .btn { flex: 1 1 17%; min-width: 0; padding: 10px 4px; }
+  .cls-controls [data-cls="full"] { flex: none; padding: 8px 12px; }
+  .cls-controls .cls-vol { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; }
+  .cls-controls .cls-vol input { flex: 1; }
+  .cls-controls .cls-label { order: -1; flex: 1 0 100%; margin: 0; text-align: center; }
+  .cls-controls .cls-speed { flex: none; }
+  .cls-audio { padding: 14px 10px; }
+  .cls-audio .sp-ctl { flex-wrap: wrap; justify-content: center; }
+}
+
+/* Aviso de sincronización en pantallas estrechas: solo un icono pequeño (el texto, en Ajustes y al
+   pasar por encima), para no tapar Bibliotecas, Creador de rutinas y Rutinas. */
+.gsync { flex: none; }
+@media (max-width: 1100px) {
+  .gsync { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; overflow: hidden; }
+  .gsync[hidden] { display: none; }
+  .gsync > span { display: none; }
+  .gsync::before { content: '☁'; font-size: 1.05rem; }
+  .gsync.err::before { content: '⚠'; }
+  .gsync:not(.err) { animation: pulse 1s infinite alternate; }
+  .gsync.err { background: #d4473a22; }
+}
+
+/* Reordenar la lista de la clase: mantener pulsado y arrastrar. */
+.cls-list li { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.cls-list.sorting li { cursor: grabbing; transition: none; }
+.cls-list li.lifted { position: relative; z-index: 2; background: var(--accent-soft); outline: 2px dashed var(--accent); box-shadow: 0 8px 22px rgb(0 0 0 / 0.25); transform: scale(1.02); }
