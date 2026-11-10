@@ -17,12 +17,14 @@ Everything stays on your computer. Optionally, sign in with Google to keep your 
 - **Import from social networks**: links and playlists from YouTube, TikTok and Facebook, and private saved collections from Instagram. Each network has a step-by-step connection tutorial; linked lists and collections re-sync automatically.
 - **Zoomable timeline** with an overview bar and a clear frame preview of the selected stretch.
 - **AI pose extraction** (MediaPipe): splits videos into exercises, detects technique (kicks, extensions, passé, plié, turns, jumps, floor work, relevé, arms…) and draws each key phase.
+- **Classes**: a folder that plays straight through — videos, audio and images one after another in their own player, with phone-friendly controls. Long-press an item in the list under the player and drag it up or down to reorder.
 - **Routine builder** with all your exercise sequences: drag them onto a routine (the page scrolls by itself near the edges), create empty routines in one click and rename them right on their tile.
 - **Routines** with manual or automatic ordering, reps, notes and printable A4 sheets. The **AI** button on each row improves the ticked panels, or the whole sequence when none are ticked (Premium).
 - **Video player** with 13 playback speeds, from ×0.1 to ×4.
 - **MEGA**: sign in (the password is never stored), browse your folders, import videos and photos, and optionally keep your data there.
 - **Google sign-in & sync**: your data mirrored to a private folder in your Google Drive (free up to 15 GB).
 - **Collaboration** (Firebase): shared folders where collaborators can add videos, routines with several editors, and shared drawings.
+- **Web version** at [divolandialabs.github.io/diva-routine/app](https://divolandialabs.github.io/diva-routine/app/): runs in any browser, on desktop or phone, with nothing to install; data stays in that browser and syncs with your Google account.
 - **Windows installer with automatic updates**: new versions are downloaded in the background and installed with one click.
 
 ## Installation

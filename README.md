@@ -9,6 +9,7 @@ App local para montar rutinas de entrenamiento de jazz a partir de videos y foto
 1. **Biblioteca.** Todo se ve en recuadros: carpetas (con un mosaico de lo que tienen dentro), videos e imágenes. A la derecha está el **menú de opciones**:
    - **Importar**: en el cuadro pega links de YouTube o Instagram (uno por línea), una **lista de reproducción de YouTube**, una **colección de tus Guardados de Instagram** (con tu cuenta conectada, ver abajo) o **imágenes** (clic derecho → Pegar, o Ctrl+V). Se ven antes y se suben al pulsar **Importar**. Pegar en cualquier otro sitio no sube nada.
    - **Subir**: videos o fotos del ordenador. También puedes arrastrarlos a la cuadrícula (o un `.txt` con links).
+   - **Clase**: crea una clase, una carpeta que se reproduce seguida: videos, audios e imágenes uno tras otro en su propio reproductor (con controles adaptados al móvil). Debajo del reproductor está la lista; mantén pulsado un elemento y arrástralo arriba o abajo para cambiar el orden. Dentro de una clase no se puede crear otra clase.
    - **Carpeta**: carpeta nueva; dentro de una carpeta, crea una **subcarpeta** (a cualquier profundidad). Dentro de una carpeta se importa en ella; su nombre se cambia arriba, donde también se ve la ruta (Biblioteca › jszz › giros).
    - **Arrastrar**: un video (o una carpeta) se arrastra sobre una carpeta para meterlo dentro, o sobre la ruta de arriba para sacarlo a ese nivel. Si está seleccionado junto con otros, se mueven todos.
    - **Instagram**: conectar tu cuenta, importar colecciones y sincronizarlas.
@@ -26,6 +27,10 @@ App local para montar rutinas de entrenamiento de jazz a partir de videos y foto
 En la tabla de una rutina, el botón **IA** de cada fila mejora con IA las viñetas que hayas marcado en esa fila; si no marcas ninguna, mejora toda la secuencia (función Premium, gasta créditos). En el video, el selector **Velocidad** va de ×0,1 a ×4 y recuerda la última elegida.
 
 Las viñetas tienen estilo de póster de ejercicios: en cada **fase** del movimiento (Inicio → Fase 2 → … → Final) se toma el fotograma real, se recorta a la persona (sin fondo) y se pasa a ilustración (colores planos, líneas de tinta y contorno), sobre fondo blanco, con flechas verdes entre fases y todas a la misma escala. La tabla de la rutina se separa en secciones de colores por categoría. Si alguna viñeta no se puede hacer, se usa una figura dibujada a partir de la pose (lado derecho en color fuerte, izquierdo en claro).
+
+## Versión web
+
+También se puede usar en el navegador, en el ordenador o en el móvil, sin instalar nada: [divolandialabs.github.io/diva-routine/app](https://divolandialabs.github.io/diva-routine/app/). Los datos se guardan en ese navegador y se sincronizan con tu cuenta de Google como en la app de Windows. Las ventanas se adaptan al móvil en vertical y, en ventanas estrechas, la cabecera se compacta.
 
 ## Instalar en Windows
 
