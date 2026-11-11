@@ -1612,3 +1612,7 @@ dialog.cls-dlg h3 { padding-right: 36px; }
   .cls-controls .cls-loopbox .btn { flex: none; padding: 8px 12px; }
 }
 .cls-bar > #clsProgress { position: relative; z-index: 1; }
+/* Barra de progreso de la clase: se puede pulsar o arrastrar para ir a un momento */
+.cls-seek { padding: 8px 0; margin: -8px 0; cursor: pointer; touch-action: none; }
+.cls-seek:hover .cls-bar { height: 9px; }
+.cls-bar { transition: height .15s; }

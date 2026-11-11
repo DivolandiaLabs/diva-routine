@@ -21,7 +21,7 @@ export function renderClassPlay(root, id) {
       <div class="cls-screen" id="clsScreen">
       <div class="cls-stage" id="clsStage"></div>
       <div class="cls-overlay">
-      <div class="cls-bar"><div id="clsProgress"></div><span class="cls-loopmark" id="clsLoopMark" hidden></span></div>
+      <div class="cls-seek" id="clsSeek" title="Haz clic (o arrastra) para ir a ese momento"><div class="cls-bar"><div id="clsProgress"></div><span class="cls-loopmark" id="clsLoopMark" hidden></span></div></div>
       <div class="cls-controls">
         <button class="btn" data-cls="prev" title="Elemento anterior (←)">⏮</button>
         <button class="btn" data-cls="back" title="10 s atrás (Mayús + ←)">⟲10</button>
@@ -30,8 +30,8 @@ export function renderClassPlay(root, id) {
         <button class="btn" data-cls="next" title="Elemento siguiente (→)">⏭</button>
         <span class="cls-loopbox">
           <button class="btn" data-cls="loop" id="clsLoop" title="Repetir: este elemento vuelve a empezar al acabar, en vez de pasar al siguiente (L)">🔁</button>
-          <button class="btn" data-cls="loopA" id="clsLoopA" title="Marca aquí dónde EMPIEZA el trozo que se repite">⇤ Inicio</button>
-          <button class="btn" data-cls="loopB" id="clsLoopB" title="Marca aquí dónde ACABA el trozo que se repite: desde ahí vuelve al inicio">Fin ⇥</button>
+          <button class="btn" data-cls="loopA" id="clsLoopA" title="Marca aquí dónde EMPIEZA el trozo que se repite">⇤</button>
+          <button class="btn" data-cls="loopB" id="clsLoopB" title="Marca aquí dónde ACABA el trozo que se repite: desde ahí vuelve al inicio">⇥</button>
         </span>
         <span class="cls-label" id="clsLabel"></span>
         <select class="cls-speed" id="clsSpeed" title="Velocidad"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
@@ -66,6 +66,7 @@ export function renderClassPlay(root, id) {
   let loop = false;
   let loopA = null;
   let loopB = null;
+  let pendingAt = 0; // dónde empezar el próximo elemento (al saltar a él desde la barra)
   let loopSpan = null; // el trozo que se repite en la barra (en %), o null
 
   const nameOf = (it) => (it.kind === 'routine' ? it.x.name : it.x.title);
@@ -90,7 +91,7 @@ export function renderClassPlay(root, id) {
     mark.style.width = `${loopSpan[1] - loopSpan[0]}%`;
     tick();
     const lbl = loopA != null && loopB == null
-      ? ` · 🔁 desde ${clock(loopStart() - segment.start)}: pulsa Fin donde acaba el trozo`
+      ? ` · 🔁 desde ${clock(loopStart() - segment.start)}: pulsa ⇥ donde acaba el trozo`
       : loopB != null ? ` · 🔁 repite ${clock(loopStart() - segment.start)}–${clock(end - segment.start)}` : ' · 🔁 repite este elemento';
     $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(items[index])}${lbl}`;
   };
@@ -142,6 +143,8 @@ export function renderClassPlay(root, id) {
   };
 
   async function show(i) {
+    const startAt = pendingAt;
+    pendingAt = 0;
     clearItem();
     finished = false;
     index = Math.max(0, Math.min(items.length - 1, i));
@@ -166,7 +169,7 @@ export function renderClassPlay(root, id) {
       video.playbackRate = rate;
       video.volume = volume;
       video.addEventListener('loadedmetadata', () => {
-        video.currentTime = segment.start;
+        video.currentTime = Math.min(segment.start + startAt, (Number.isFinite(segment.end) ? segment.end : video.duration) - 0.1);
         video.playbackRate = rate;
         // Si el sistema no deja reproducir solo, queda en pausa y el botón ▶ lo arranca.
         if (playing) video.play().catch(() => setPaused());
@@ -196,7 +199,7 @@ export function renderClassPlay(root, id) {
         // Sin fin elegido, la canción entera (la que diga Spotify).
         if (set.end == null) segment.end = media.duration;
         rememberDuration(lib, it.x.id, media.duration);
-        if (segment.start) media.currentTime = segment.start;
+        if (segment.start || startAt) media.currentTime = segment.start + startAt;
       }, { once: true });
       if (playing) media.play();
       media.addEventListener('timeupdate', () => {
@@ -212,6 +215,7 @@ export function renderClassPlay(root, id) {
       stage.innerHTML = `<div class="cls-routine"><h3>${esc(it.x.name)}</h3><div class="cls-routine-grid">${exs.map((e, n) => `
         <figure><span class="cls-rn">${n + 1}</span>${exerciseFigure(e, 220)}<figcaption>${esc(e.title)}</figcaption></figure>`).join('')}</div></div>`;
     }
+    spent = Math.min(startAt, Math.max(0, secs[index] - 0.1));
     if (playing) runTimer();
   }
   function runTimer() {
@@ -230,6 +234,27 @@ export function renderClassPlay(root, id) {
     clearTimeout(timer);
     shownAt = 0;
     if (playing) runTimer();
+    tick();
+  }
+  /** Va a un momento de la clase (en segundos desde el principio): el elemento que toca y su punto. */
+  function seekTo(t, jump = true) {
+    let i = 0;
+    while (i < items.length - 1 && t >= before(i + 1)) i++;
+    const off = Math.max(0, t - before(i));
+    if (i !== index || finished) {
+      if (!jump) return;
+      pendingAt = off;
+      return show(i);
+    }
+    if (video && segment) {
+      const end = Number.isFinite(segment.end) ? segment.end : video.duration || Infinity;
+      video.currentTime = Math.min(end - 0.1, segment.start + off);
+    } else {
+      spent = Math.min(secs[index] - 0.1, off);
+      clearTimeout(timer);
+      shownAt = 0;
+      if (playing) runTimer();
+    }
     tick();
   }
   function setRate(r) {
@@ -381,6 +406,29 @@ export function renderClassPlay(root, id) {
       toggle();
     }
   });
+  // Barra de progreso: clic (o arrastrar) para ir a ese momento de la clase.
+  const seekBar = $('#clsSeek');
+  const barTime = (e) => {
+    const r = seekBar.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * total;
+  };
+  let scrubbing = false;
+  seekBar.addEventListener('pointerdown', (e) => {
+    if (!total || e.button > 0) return;
+    e.preventDefault();
+    scrubbing = true;
+    seekBar.setPointerCapture?.(e.pointerId);
+    seekTo(barTime(e));
+  });
+  // Mientras se arrastra, solo se mueve dentro del elemento que suena; al soltar, va donde sea.
+  seekBar.addEventListener('pointermove', (e) => scrubbing && seekTo(barTime(e), false));
+  const endScrub = (e) => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    seekTo(barTime(e));
+  };
+  seekBar.addEventListener('pointerup', endScrub);
+  seekBar.addEventListener('pointercancel', () => (scrubbing = false));
   const onKey = (e) => {
     if (e.target.closest?.('input, textarea')) return;
     if (e.key === ' ') (e.preventDefault(), toggle());
