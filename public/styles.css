@@ -1611,3 +1611,4 @@ dialog.cls-dlg h3 { padding-right: 36px; }
   .cls-controls .cls-loopbox { flex: none; gap: 6px; }
   .cls-controls .cls-loopbox .btn { flex: none; padding: 8px 12px; }
 }
+.cls-bar > #clsProgress { position: relative; z-index: 1; }

@@ -29,9 +29,9 @@ export function renderClassPlay(root, id) {
         <button class="btn" data-cls="fwd" title="10 s adelante (Mayús + →)">10⟳</button>
         <button class="btn" data-cls="next" title="Elemento siguiente (→)">⏭</button>
         <span class="cls-loopbox">
-          <button class="btn" data-cls="loop" id="clsLoop" title="Repetir en bucle este elemento (L)">🔁</button>
-          <button class="btn" data-cls="loopA" id="clsLoopA" title="Inicio del bucle: desde aquí (A)">A</button>
-          <button class="btn" data-cls="loopB" id="clsLoopB" title="Fin del bucle: hasta aquí (B)">B</button>
+          <button class="btn" data-cls="loop" id="clsLoop" title="Repetir: este elemento vuelve a empezar al acabar, en vez de pasar al siguiente (L)">🔁</button>
+          <button class="btn" data-cls="loopA" id="clsLoopA" title="Marca aquí dónde EMPIEZA el trozo que se repite">⇤ Inicio</button>
+          <button class="btn" data-cls="loopB" id="clsLoopB" title="Marca aquí dónde ACABA el trozo que se repite: desde ahí vuelve al inicio">Fin ⇥</button>
         </span>
         <span class="cls-label" id="clsLabel"></span>
         <select class="cls-speed" id="clsSpeed" title="Velocidad"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
@@ -66,6 +66,7 @@ export function renderClassPlay(root, id) {
   let loop = false;
   let loopA = null;
   let loopB = null;
+  let loopSpan = null; // el trozo que se repite en la barra (en %), o null
 
   const nameOf = (it) => (it.kind === 'routine' ? it.x.name : it.x.title);
   const before = (i) => secs.slice(0, i).reduce((a, b) => a + b, 0);
@@ -81,12 +82,16 @@ export function renderClassPlay(root, id) {
     $('#clsLoopA').disabled = $('#clsLoopB').disabled = !timed;
     const mark = $('#clsLoopMark');
     const end = Math.min(loopEnd(), segment && Number.isFinite(segment.end) ? segment.end : video?.duration || Infinity);
-    if (!loop || !timed || !total || !Number.isFinite(end)) return (mark.hidden = true);
+    if (!loop || !timed || !total || !Number.isFinite(end)) return ((mark.hidden = true), (loopSpan = null), tick());
     const at = (t) => ((before(index) + Math.max(0, t - segment.start)) / total) * 100;
     mark.hidden = false;
-    mark.style.left = `${at(loopStart())}%`;
-    mark.style.width = `${Math.max(0.5, at(end) - at(loopStart()))}%`;
-    const lbl = loopA != null || loopB != null ? ` · 🔁 ${clock(loopStart() - segment.start)}–${clock(end - segment.start)}` : ' · 🔁';
+    loopSpan = [at(loopStart()), Math.max(at(loopStart()) + 0.5, at(end))];
+    mark.style.left = `${loopSpan[0]}%`;
+    mark.style.width = `${loopSpan[1] - loopSpan[0]}%`;
+    tick();
+    const lbl = loopA != null && loopB == null
+      ? ` · 🔁 desde ${clock(loopStart() - segment.start)}: pulsa Fin donde acaba el trozo`
+      : loopB != null ? ` · 🔁 repite ${clock(loopStart() - segment.start)}–${clock(end - segment.start)}` : ' · 🔁 repite este elemento';
     $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(items[index])}${lbl}`;
   };
   /** Ha llegado al final del tramo: con bucle vuelve al principio (o a A); si no, pasa al siguiente. */
@@ -108,7 +113,7 @@ export function renderClassPlay(root, id) {
       loopA = t;
       if (loopB != null && loopB <= t + 0.2) loopB = null;
     } else {
-      if (t <= loopStart() + 0.2) return toast('El fin del bucle (B) tiene que ir después del inicio (A)', 'error');
+      if (t <= loopStart() + 0.2) return toast('El fin del trozo tiene que ir después de su inicio', 'error');
       loopB = t;
       video.currentTime = loopStart(); // empieza a repetir ya
     }
@@ -121,7 +126,12 @@ export function renderClassPlay(root, id) {
   const tick = () => {
     const now = finished ? total : Math.min(total, before(index) + elapsedHere());
     $('#clsNow').textContent = clock(now);
-    $('#clsProgress').style.width = total ? `${(now / total) * 100}%` : '0';
+    // Con bucle, la barra solo marca lo que va del trozo que se repite: lo de antes y lo de
+    // después quedan en gris, porque no se va a reproducir.
+    const pct = total ? (now / total) * 100 : 0;
+    const bar = $('#clsProgress');
+    bar.style.marginLeft = loopSpan ? `${loopSpan[0]}%` : '0';
+    bar.style.width = loopSpan ? `${Math.max(0, Math.min(pct, loopSpan[1]) - loopSpan[0])}%` : `${pct}%`;
   };
   const clearItem = () => {
     clearTimeout(timer);
