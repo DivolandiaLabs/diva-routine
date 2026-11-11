@@ -21,13 +21,18 @@ export function renderClassPlay(root, id) {
       <div class="cls-screen" id="clsScreen">
       <div class="cls-stage" id="clsStage"></div>
       <div class="cls-overlay">
-      <div class="cls-bar"><div id="clsProgress"></div></div>
+      <div class="cls-bar"><div id="clsProgress"></div><span class="cls-loopmark" id="clsLoopMark" hidden></span></div>
       <div class="cls-controls">
         <button class="btn" data-cls="prev" title="Elemento anterior (←)">⏮</button>
         <button class="btn" data-cls="back" title="10 s atrás (Mayús + ←)">⟲10</button>
         <button class="btn primary" data-cls="toggle" id="clsToggle" title="Pausa">⏸</button>
         <button class="btn" data-cls="fwd" title="10 s adelante (Mayús + →)">10⟳</button>
         <button class="btn" data-cls="next" title="Elemento siguiente (→)">⏭</button>
+        <span class="cls-loopbox">
+          <button class="btn" data-cls="loop" id="clsLoop" title="Repetir en bucle este elemento (L)">🔁</button>
+          <button class="btn" data-cls="loopA" id="clsLoopA" title="Inicio del bucle: desde aquí (A)">A</button>
+          <button class="btn" data-cls="loopB" id="clsLoopB" title="Fin del bucle: hasta aquí (B)">B</button>
+        </span>
         <span class="cls-label" id="clsLabel"></span>
         <select class="cls-speed" id="clsSpeed" title="Velocidad"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
         <label class="cls-vol" title="Volumen">🔊<input type="range" id="clsVol" min="0" max="1" step="0.05" value="1"></label>
@@ -57,11 +62,58 @@ export function renderClassPlay(root, id) {
   let finished = false;
   let volume = 1;
   let rate = 1; // velocidad: videos, audios, y el tiempo de fotos y rutinas
+  // Bucle: repite el elemento que suena (o, en videos y audios, solo de A a B).
+  let loop = false;
+  let loopA = null;
+  let loopB = null;
 
   const nameOf = (it) => (it.kind === 'routine' ? it.x.name : it.x.title);
   const before = (i) => secs.slice(0, i).reduce((a, b) => a + b, 0);
   const elapsedHere = () => (video && segment ? Math.max(0, video.currentTime - segment.start) : spent + (playing && shownAt ? ((Date.now() - shownAt) / 1000) * rate : 0));
 
+  const loopStart = () => (loopA ?? segment?.start ?? 0);
+  const loopEnd = () => (loopB ?? segment?.end ?? Infinity);
+  const drawLoop = () => {
+    const timed = !!(video && segment);
+    $('#clsLoop').classList.toggle('on', loop);
+    $('#clsLoopA').classList.toggle('on', loopA != null);
+    $('#clsLoopB').classList.toggle('on', loopB != null);
+    $('#clsLoopA').disabled = $('#clsLoopB').disabled = !timed;
+    const mark = $('#clsLoopMark');
+    const end = Math.min(loopEnd(), segment && Number.isFinite(segment.end) ? segment.end : video?.duration || Infinity);
+    if (!loop || !timed || !total || !Number.isFinite(end)) return (mark.hidden = true);
+    const at = (t) => ((before(index) + Math.max(0, t - segment.start)) / total) * 100;
+    mark.hidden = false;
+    mark.style.left = `${at(loopStart())}%`;
+    mark.style.width = `${Math.max(0.5, at(end) - at(loopStart()))}%`;
+    const lbl = loopA != null || loopB != null ? ` · 🔁 ${clock(loopStart() - segment.start)}–${clock(end - segment.start)}` : ' · 🔁';
+    $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(items[index])}${lbl}`;
+  };
+  /** Ha llegado al final del tramo: con bucle vuelve al principio (o a A); si no, pasa al siguiente. */
+  const reachedEnd = () => {
+    if (!loop) return next();
+    video.currentTime = loopStart();
+    if (playing) video.play?.().catch(() => {});
+  };
+  function setLoop(on) {
+    loop = on;
+    if (!on) loopA = loopB = null;
+    drawLoop();
+    if (!on) $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(items[index])}`;
+  }
+  function markLoop(which) {
+    if (!video || !segment) return;
+    const t = video.currentTime;
+    if (which === 'A') {
+      loopA = t;
+      if (loopB != null && loopB <= t + 0.2) loopB = null;
+    } else {
+      if (t <= loopStart() + 0.2) return toast('El fin del bucle (B) tiene que ir después del inicio (A)', 'error');
+      loopB = t;
+      video.currentTime = loopStart(); // empieza a repetir ya
+    }
+    setLoop(true);
+  }
   const drawList = () => {
     $('#clsList').innerHTML = items.map((it, i) => `
       <li class="${i === index ? 'on' : ''}" data-cls-go="${i}" title="Mantén pulsado y arrastra para cambiar el orden"><span class="cls-n">${i + 1}</span><span class="cls-t">${esc(nameOf(it))}</span><span class="cls-d">${clock(secs[i])}</span></li>`).join('');
@@ -85,10 +137,13 @@ export function renderClassPlay(root, id) {
     index = Math.max(0, Math.min(items.length - 1, i));
     spent = 0;
     shownAt = 0;
+    loop = false;
+    loopA = loopB = null;
     const it = items[index];
     const type = itemType(it);
     $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(it)}`;
     drawList();
+    drawLoop();
     const stage = $('#clsStage');
     if (type === 'video') {
       segment = await segmentOf(lib, it.x);
@@ -107,9 +162,10 @@ export function renderClassPlay(root, id) {
         if (playing) video.play().catch(() => setPaused());
       }, { once: true });
       video.addEventListener('timeupdate', () => {
-        if (video && video.currentTime >= segment.end - 0.05) next();
+        if (video && video.currentTime >= Math.min(segment.end, loopEnd()) - 0.05) reachedEnd();
       });
-      video.addEventListener('ended', () => next());
+      video.addEventListener('ended', () => reachedEnd());
+      drawLoop();
       // Si el archivo no se puede abrir (borrado o movido), se salta a lo siguiente.
       video.addEventListener('error', () => {
         toast(`No se pudo reproducir «${nameOf(it)}»: se salta`, 'error');
@@ -134,9 +190,10 @@ export function renderClassPlay(root, id) {
       }, { once: true });
       if (playing) media.play();
       media.addEventListener('timeupdate', () => {
-        if (video === media && media.currentTime >= segment.end - 0.3) next();
+        if (video === media && media.currentTime >= Math.min(segment.end, loopEnd()) - 0.3) reachedEnd();
       });
-      media.addEventListener('ended', () => video === media && next());
+      media.addEventListener('ended', () => video === media && reachedEnd());
+      drawLoop();
       return;
     } else if (type === 'image') {
       stage.innerHTML = `<img src="/media/${esc(encodeURIComponent(it.x.source.file))}" alt="">`;
@@ -149,13 +206,14 @@ export function renderClassPlay(root, id) {
   }
   function runTimer() {
     shownAt = Date.now();
-    timer = setTimeout(next, Math.max(0, ((secs[index] - spent) * 1000) / rate));
+    // Fotos y rutinas: con bucle, vuelven a empezar su tiempo en vez de pasar al siguiente.
+    timer = setTimeout(() => (loop ? ((spent = 0), runTimer()) : next()), Math.max(0, ((secs[index] - spent) * 1000) / rate));
   }
   /** Avanza o retrocede dentro del elemento que suena (sin salir de su tramo). */
   function seek(d) {
     if (video && segment) {
-      const end = Number.isFinite(segment.end) ? segment.end : video.duration || Infinity;
-      video.currentTime = Math.max(segment.start, Math.min(end - 0.1, video.currentTime + d));
+      const end = Math.min(loop ? loopEnd() : Infinity, Number.isFinite(segment.end) ? segment.end : video.duration || Infinity);
+      video.currentTime = Math.max(loop ? loopStart() : segment.start, Math.min(end - 0.1, video.currentTime + d));
       return;
     }
     spent = Math.max(0, Math.min(secs[index] - 0.1, elapsedHere() + d));
@@ -257,6 +315,7 @@ export function renderClassPlay(root, id) {
     secs.splice(to, 0, s);
     index = items.indexOf(playingNow);
     $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(items[index])}`;
+    drawLoop();
     drawList();
     // Se guarda como el orden de la clase («Mi orden»); lo que no se puede reproducir conserva su hueco.
     const queue = [...items];
@@ -303,6 +362,9 @@ export function renderClassPlay(root, id) {
     else if (act === 'back') seek(-10);
     else if (act === 'fwd') seek(10);
     else if (act === 'full') fullscreen();
+    else if (act === 'loop') setLoop(!loop);
+    else if (act === 'loopA') markLoop('A');
+    else if (act === 'loopB') markLoop('B');
     else if (act === 'toggle') {
       // Acabada la clase, el botón vuelve a empezar.
       if (finished) return (playing = true), ($('#clsToggle').textContent = '⏸'), show(0);
@@ -315,6 +377,9 @@ export function renderClassPlay(root, id) {
     else if (e.key === 'ArrowRight') e.shiftKey ? seek(10) : next();
     else if (e.key === 'ArrowLeft') e.shiftKey ? seek(-10) : show(index - 1);
     else if (e.key === 'f' || e.key === 'F') fullscreen();
+    else if (e.key === 'l' || e.key === 'L') setLoop(!loop);
+    else if (e.key === 'a' || e.key === 'A') markLoop('A');
+    else if (e.key === 'b' || e.key === 'B') markLoop('B');
   };
   document.addEventListener('keydown', onKey);
   $('#clsSpeed').addEventListener('change', (e) => setRate(+e.target.value));

@@ -1600,3 +1600,14 @@ dialog.cls-dlg h3 { padding-right: 36px; }
 .cls-list li { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .cls-list.sorting li { cursor: grabbing; transition: none; }
 .cls-list li.lifted { position: relative; z-index: 2; background: var(--accent-soft); outline: 2px dashed var(--accent); box-shadow: 0 8px 22px rgb(0 0 0 / 0.25); transform: scale(1.02); }
+
+/* Bucle del reproductor de clases: 🔁 repite el elemento; A y B, solo un trozo del video */
+.cls-bar { position: relative; }
+.cls-loopmark { position: absolute; top: 0; bottom: 0; background: #ffd54a; opacity: .75; pointer-events: none; }
+.cls-loopbox { display: inline-flex; gap: 8px; }
+.cls-loopbox .btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cls-loopbox .btn:disabled { opacity: .4; cursor: default; }
+@media (max-width: 640px) {
+  .cls-controls .cls-loopbox { flex: none; gap: 6px; }
+  .cls-controls .cls-loopbox .btn { flex: none; padding: 8px 12px; }
+}
