@@ -114,11 +114,13 @@ export function renderClassPlay(root, id) {
       loopA = t;
       if (loopB != null && loopB <= t + 0.2) loopB = null;
     } else {
-      if (t <= loopStart() + 0.2) return toast('El fin del trozo tiene que ir después de su inicio', 'error');
+      if (t <= loopStart() + 0.2) return toast('Primero lleva el vídeo hasta donde acaba el trozo (después de ⇤) y luego pulsa ⇥', 'error');
       loopB = t;
       video.currentTime = loopStart(); // empieza a repetir ya
     }
     setLoop(true);
+    // Marcado el fin, el trozo se pone a sonar aunque se hubiera marcado en pausa.
+    if (which === 'B' && !playing) toggle();
   }
   const drawList = () => {
     $('#clsList').innerHTML = items.map((it, i) => `
