@@ -705,7 +705,9 @@ export function renderLibrary(root, libraryId) {
   const folderTile = (l) => {
     const vids = videosOf(l.id);
     const subs = childFolders(l.id).length;
-    const shown = (vids.length ? vids : videosDeep(l.id)).slice(0, 4);
+    // Carátula elegida (una foto o un video de dentro): se ve sola, en grande.
+    const cover = l.cover && videoById(l.cover);
+    const shown = cover && cover.libraryId === l.id ? [cover] : (vids.length ? vids : videosDeep(l.id)).slice(0, 4);
     const sp = spaceFor('folder', l.id);
     const received = sp && !sp.mine;
     return `
@@ -813,10 +815,18 @@ export function renderLibrary(root, libraryId) {
     if (playingId === box.dataset.aud) player.playbackRate = Number(e.target.value);
   });
 
+  // En una clase, una foto o un video se puede poner de carátula de la clase.
+  const COVER_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="1.8" fill="currentColor"/><path d="M5 17.5l4.5-4.5 3 3 2.5-2.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+  const coverBtn = (v) => {
+    if (!folder || !isClass(folder) || v.libraryId !== folder.id || isAudio(v) || v.source.platform === 'spotify') return '';
+    const on = libraryById(folder.id)?.cover === v.id; // la carpeta tal como está ahora
+    return `<button class="card-cover${on ? ' on' : ''}" data-cover="${v.id}" title="${on ? 'Quitar de carátula de la clase' : 'Poner de carátula de la clase'}" aria-label="${on ? 'Quitar de carátula' : 'Poner de carátula'} ${esc(v.title)}" aria-pressed="${on}">${COVER_ICON}</button>`;
+  };
   const videoTile = (v, showFolder) => `
     <article class="tile tile-${isAudio(v) ? 'audio' : v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="false">
       <label class="sel" title="Seleccionar para una rutina"><input type="checkbox" data-sel-video="${v.id}"><b class="order"></b></label>
       <button class="card-pin${v.pinnedTop ? ' on' : ''}" data-pin-video="${v.id}" title="${v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${v.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(v.title)}" aria-pressed="${Boolean(v.pinnedTop)}">${PIN}</button>
+      ${coverBtn(v)}
       ${lockedIn(v, v.libraryId) ? '' : `<button class="card-del" data-del-video="${v.id}" title="Borrar" aria-label="Borrar ${esc(v.title)}">✕</button>`}
       ${audioFile(v) ? audioPlayer(v) : `<a class="tile-thumb" href="#/video/${v.id}">${videoThumb(v)}</a>`}
       <${audioFile(v) ? 'div' : 'a'} class="tile-body" ${audioFile(v) ? '' : `href="#/video/${v.id}"`}>
@@ -1309,7 +1319,8 @@ export function renderLibrary(root, libraryId) {
     // La biblioteca principal como destino: sus carpetas de arriba no tienen parentId.
     const tid = target && !libraryById(target)?.root ? target : null;
     if (moving.folders.some((f) => f === tid || descendantIds(f).includes(tid))) return false;
-    if (moving.routines.length) return false; // una rutina solo se recoloca
+    // Una rutina se puede soltar en una carpeta o clase donde aún no esté.
+    if (moving.routines.length) return Boolean(target && target !== place() && !moving.routines.some((id) => isPinnedIn(routineById(id), target)));
     const vidsHere = moving.videos.every((id) => videoById(id)?.libraryId === (target || rootLibrary().id));
     const libsHere = moving.folders.every((id) => (libraryById(id)?.parentId || null) === tid);
     return !(vidsHere && libsHere);
@@ -1509,9 +1520,30 @@ export function renderLibrary(root, libraryId) {
     const t = dropTarget;
     const { videos, folders: libs, routines } = moving;
     endMove();
+    // Alt + soltar en la misma carpeta (en un hueco o sobre otro recuadro): un duplicado aquí.
+    const overGrid = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('#grid');
+    if (e.altKey && !t && overGrid && (videos.length || libs.length)) return moveOrCopy(place(), videos, libs, e.clientX, e.clientY, 'copy');
     if (at) return reorderTo(at, videos[0] || libs[0] || routines[0]);
+    if (t && routines.length) return dropRoutines(routines, t.dataset.dropLib);
     // Alt + soltar copia y Ctrl + soltar mueve, sin preguntar; sin tecla, sale el menú.
     if (t) return moveOrCopy(t.dataset.dropLib || null, videos, libs, e.clientX, e.clientY, e.altKey ? 'copy' : e.ctrlKey ? 'move' : null);
+  };
+  // Rutina soltada en una clase: se añade (sigue también donde estaba). En otra carpeta: se mueve allí.
+  const dropRoutines = async (ids, target) => {
+    const lib = libraryById(target);
+    if (!lib) return;
+    const toClass = isClass(lib);
+    try {
+      for (const id of ids) {
+        const now = pinnedShelves(routineById(id));
+        const next = [...new Set([...(toClass ? now : now.filter((x) => x !== place())), lib.id])];
+        upsert('routines', await api.updateRoutine(id, { pinnedIn: next, pinned: true }));
+      }
+      emit('data');
+      toast(`Rutina ${toClass ? 'añadida a la clase' : 'movida a'} «${libraryLabel(lib)}»`);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   };
   const onTileKey = (e) => e.key === 'Escape' && moving && endMove();
   document.addEventListener('pointermove', onTileMove);
@@ -1872,6 +1904,19 @@ export function renderLibrary(root, libraryId) {
       try {
         if (isLib) upsert('libraries', await api.updateLibrary(rec.id, { pinnedTop: !rec.pinnedTop }));
         else upsert('videos', await api.updateVideo(rec.id, { pinnedTop: !rec.pinnedTop }));
+        emit('data');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
+    // Carátula de la clase: la foto o el video elegido (otra vez, se quita).
+    const coverEl = t.closest('[data-cover]');
+    if (coverEl) {
+      e.preventDefault();
+      const id = coverEl.dataset.cover;
+      try {
+        upsert('libraries', await api.updateLibrary(folder.id, { cover: libraryById(folder.id)?.cover === id ? null : id }));
         emit('data');
       } catch (err) {
         toast(err.message, 'error');

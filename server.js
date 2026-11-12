@@ -561,11 +561,19 @@ const collab = createCollab({
 // Su archivo vive en otra nube (Drive compartido, o importado de tu cuenta de MEGA / Google Drive):
 // no se sincroniza, y cada ordenador lo baja de allí cuando le falta.
 const fromAccount = (v) => Boolean(v.source?.ref?.auth && v.source.platform === 'cloud');
+// Un archivo vacío (0 bytes) cuenta como que no está: se vuelve a bajar.
+const hasUpload = (name) => {
+  try {
+    return fs.statSync(path.join(UPLOAD_DIR, name)).size > 0;
+  } catch {
+    return false;
+  }
+};
 const remoteCopy = (v) => Boolean(v.source?.drive || fromAccount(v));
 // En la web, los que están en tu Google Drive no se bajan: se ven desde allí (ver /media/).
 const driveIdOf = (v) => v.source?.drive || (fromAccount(v) && v.source.ref.cloud !== 'mega' ? v.source.ref.id : null);
 const streamable = (v) => Boolean(globalThis.jrWeb && google.connected() && driveIdOf(v));
-const forClient = (v) => (remoteCopy(v) && v.source.file && !streamable(v) && !fs.existsSync(path.join(UPLOAD_DIR, v.source.file))
+const forClient = (v) => (remoteCopy(v) && v.source.file && !streamable(v) && !hasUpload(v.source.file)
   ? { ...v, source: { ...v.source, file: null } }
   : v);
 
@@ -573,8 +581,24 @@ const forClient = (v) => (remoteCopy(v) && v.source.file && !streamable(v) && !f
 async function fetchShared(v0) {
   try {
     const dest = path.join(UPLOAD_DIR, v0.source.file);
-    if (v0.source.drive) await google.downloadShared(v0.source.drive, dest);
-    else if (v0.source.ref.cloud === 'mega') await mega.downloadFile(v0.source.ref.id, dest);
+    if (v0.source.drive) {
+      try {
+        await google.downloadShared(v0.source.drive, dest);
+      } catch (e) {
+        // La copia de Drive ya no está (se borró): si el video vino de una red social, se baja
+        // otra vez del original, con el mismo nombre de archivo.
+        if (!v0.source.url || v0.source.platform === 'cloud') throw e;
+        const got = await downloadSource(v0.source);
+        await fsp.rename(path.join(UPLOAD_DIR, got.file), dest);
+        const v = db.videos.find((x) => x.id === v0.id);
+        if (v?.source.fetchError) {
+          const before = structuredClone(v);
+          delete v.source.fetchError;
+          libraryHistory.acceptAutomatic('videos', before, v, ['source', 'poster', 'title']);
+          await saveDb();
+        }
+      }
+    } else if (v0.source.ref.cloud === 'mega') await mega.downloadFile(v0.source.ref.id, dest);
     else await google.downloadFile(v0.source.ref.id, dest);
   } catch (e) {
     const v = db.videos.find((x) => x.id === v0.id);
@@ -1286,7 +1310,9 @@ async function deleteVideo(v) {
   await removeUpload(v.poster);
   await Promise.all([...heldUploads]);
   // La copia compartida en tu Drive, si la subiste tú.
-  if (!libraryHistory.active() && v.source.drive && v.source.driveBy && v.source.driveBy === google.email()?.toLowerCase()) google.deleteFile(v.source.drive).catch(() => {});
+  // Solo si ningún otro video (p. ej. una copia en otra carpeta) usa ese mismo archivo.
+  if (!libraryHistory.active() && v.source.drive && v.source.driveBy && v.source.driveBy === google.email()?.toLowerCase()
+    && !db.videos.some((x) => x.source?.drive === v.source.drive)) google.deleteFile(v.source.drive).catch(() => {});
 }
 
 async function handleApi(req, res, parts) {
@@ -1829,6 +1855,11 @@ async function handleApi(req, res, parts) {
       }
       if (body.nameLocked === false) delete lib.nameLocked; // vuelve a seguir el nombre de la colección
       if ('pinnedTop' in body) body.pinnedTop ? (lib.pinnedTop = true) : delete lib.pinnedTop; // fijada arriba
+      // Carátula: una foto o un video de dentro de la carpeta (null la quita).
+      if ('cover' in body) {
+        if (body.cover && db.videos.some((v) => v.id === body.cover && v.libraryId === lib.id)) lib.cover = String(body.cover);
+        else delete lib.cover;
+      }
       // Clase: cuánto se ve cada cosa. Video: { start, end } en segundos; foto o rutina: { secs }.
       if (lib.kind === 'class' && body.classItems && typeof body.classItems === 'object') {
         const num = (x, max) => (Number.isFinite(+x) && +x >= 0 ? Math.min(+x, max) : null);
@@ -2005,7 +2036,7 @@ async function handleApi(req, res, parts) {
     if (action === 'fetch' && method === 'POST') {
       if (remoteCopy(v) && v.source.file) {
         // Compartido por otra persona (o subido desde otro ordenador tuyo): de su Drive.
-        if (!fs.existsSync(path.join(UPLOAD_DIR, v.source.file))) {
+        if (!hasUpload(v.source.file)) {
           if (!fetching.has(v.id)) fetching.set(v.id, fetchShared(v).finally(() => fetching.delete(v.id)));
           await fetching.get(v.id);
         }

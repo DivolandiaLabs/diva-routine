@@ -36,6 +36,7 @@ export function renderClassPlay(root, id) {
         <span class="cls-label" id="clsLabel"></span>
         <select class="cls-speed" id="clsSpeed" title="Velocidad"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
         <label class="cls-vol" title="Volumen">🔊<input type="range" id="clsVol" min="0" max="1" step="0.05" value="1"></label>
+        <button class="btn" data-cls="mirror" id="clsMirror" title="Espejo: ver el vídeo invertido, como en el espejo de clase (M)">⇆</button>
         <button class="btn" data-cls="full" title="Pantalla completa (F)">⛶</button>
       </div>
       </div>
@@ -61,6 +62,8 @@ export function renderClassPlay(root, id) {
   let gone = false;
   let finished = false;
   let volume = 1;
+  let mirror = false; // imagen invertida, como un espejo (se recuerda)
+  try { mirror = localStorage.getItem('jr-mirror') === '1'; } catch { /* sin almacenamiento */ }
   let rate = 1; // velocidad: videos, audios, y el tiempo de fotos y rutinas
   // Bucle: repite el elemento que suena (o, en videos y audios, solo de A a B).
   let loop = false;
@@ -265,6 +268,12 @@ export function renderClassPlay(root, id) {
     if (video && 'playbackRate' in video) video.playbackRate = r;
     else if (!video && playing) (clearTimeout(timer), runTimer());
   }
+  function setMirror(on) {
+    mirror = on;
+    $('#clsStage').classList.toggle('mirror', mirror);
+    $('#clsMirror').classList.toggle('on', mirror);
+    try { localStorage.setItem('jr-mirror', mirror ? '1' : '0'); } catch { /* solo esta vez */ }
+  }
   function fullscreen() {
     const box = root.querySelector('.cls-screen');
     if (document.fullscreenElement) document.exitFullscreen();
@@ -399,6 +408,7 @@ export function renderClassPlay(root, id) {
     else if (act === 'back') seek(-10);
     else if (act === 'fwd') seek(10);
     else if (act === 'full') fullscreen();
+    else if (act === 'mirror') setMirror(!mirror);
     else if (act === 'loop') setLoop(!loop);
     else if (act === 'loopA') markLoop('A');
     else if (act === 'loopB') markLoop('B');
@@ -437,6 +447,7 @@ export function renderClassPlay(root, id) {
     else if (e.key === 'ArrowRight') e.shiftKey ? seek(10) : next();
     else if (e.key === 'ArrowLeft') e.shiftKey ? seek(-10) : show(index - 1);
     else if (e.key === 'f' || e.key === 'F') fullscreen();
+    else if (e.key === 'm' || e.key === 'M') setMirror(!mirror);
     else if (e.key === 'l' || e.key === 'L') setLoop(!loop);
     else if (e.key === 'a' || e.key === 'A') markLoop('A');
     else if (e.key === 'b' || e.key === 'B') markLoop('B');
@@ -464,6 +475,7 @@ export function renderClassPlay(root, id) {
     total = list.reduce((a, b) => a + b, 0);
     if (gone) return;
     $('#clsTotal').textContent = clock(total);
+    setMirror(mirror);
     show(0); // con las duraciones ya sabidas
   });
 

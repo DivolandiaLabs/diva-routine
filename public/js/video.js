@@ -87,6 +87,7 @@ export function renderVideo(root, id) {
               </span>
               <label class="tl-speed" title="Velocidad de reproducción">Velocidad
                 <select id="speed" aria-label="Velocidad de reproducción">${SPEEDS.map((x) => `<option value="${x}">${x === 1 ? 'Normal' : `×${String(x).replace('.', ',')}`}</option>`).join('')}</select></label>
+              <button class="btn small ghost" id="mirrorBtn" title="Espejo: ver el vídeo invertido, como en el espejo de clase">⇆ Espejo</button>
               <span class="hint" id="now"></span>
             </div>
             <div class="tl-fields">
@@ -148,6 +149,22 @@ export function renderVideo(root, id) {
     const msg = r.ok ? `formato no compatible (${r.headers?.get('Content-Type') || '?'})` : (await r.json?.().catch(() => null))?.error || `${r.status || ''} ${r.statusText || ''}`;
     toast(`${tr('No se pudo cargar el video')}: ${msg}`, 'error');
   }, { once: true });
+  // Espejo: invierte la imagen (solo se ve así; los dibujos se sacan del vídeo original).
+  if (video) {
+    const btn = $('#mirrorBtn');
+    const apply = (on) => {
+      video.closest('.player').classList.toggle('mirror', on);
+      btn.classList.toggle('on', on);
+    };
+    let on = false;
+    try { on = localStorage.getItem('jr-mirror') === '1'; } catch { /* sin almacenamiento */ }
+    apply(on);
+    btn.addEventListener('click', () => {
+      on = !on;
+      apply(on);
+      try { localStorage.setItem('jr-mirror', on ? '1' : '0'); } catch { /* solo esta vez */ }
+    });
+  }
   // Velocidad: se recuerda la última elegida para todos los videos.
   if (video) {
     const speed = $('#speed');

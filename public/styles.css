@@ -1616,3 +1616,17 @@ dialog.cls-dlg h3 { padding-right: 36px; }
 .cls-seek { padding: 8px 0; margin: -8px 0; cursor: pointer; touch-action: none; }
 .cls-seek:hover .cls-bar { height: 9px; }
 .cls-bar { transition: height .15s; }
+
+/* Espejo: la imagen se ve invertida, como en el espejo de clase; los controles del vídeo no. */
+.cls-stage.mirror video, .cls-stage.mirror > img, .player.mirror video, .player.mirror img { transform: scaleX(-1); }
+.player.mirror video::-webkit-media-controls-panel { transform: scaleX(-1); }
+
+/* Carátula de la clase: el botón junto al pin, en las fotos y videos de dentro. */
+.card-cover {
+  position: absolute; top: 8px; right: 76px; z-index: 2; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.15s;
+}
+.card-cover svg { width: 15px; height: 15px; }
+.tile:hover .card-cover, .card-cover:focus-visible, .card-cover.on { opacity: 1; }
+.card-cover:hover, .card-cover.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (hover: none) { .card-cover { opacity: 1; } }

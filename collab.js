@@ -367,7 +367,7 @@ export function createCollab({ localDir, uploadDir, getDb, saveDb, markSaved, on
     // Videos y fotos de una carpeta compartida: a tu Drive, con enlace para los demás.
     if (sp.type === 'folder') {
       const up = [...setOf(sp, ix)].filter((k) => k.startsWith('videos~')).map((k) => recOf(ix, k))
-        .filter((v) => v.source && !v.source.drive && fileHere(v.source.file));
+        .filter((v) => v.source && !v.source.drive && fileHere(v.source.file) && fs.statSync(path.join(uploadDir, v.source.file)).size > 0);
       for (let n = 0; n < up.length; n++) {
         const v = up[n];
         cs.progress = { done: n, total: up.length, what: 'Subiendo a tu Drive' };

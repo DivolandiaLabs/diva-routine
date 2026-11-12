@@ -477,6 +477,8 @@ export async function downloadShared(id, dest) {
   const tmp = `${dest}.descargando`;
   try {
     await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
+    // Quien lo compartió subió un archivo vacío: no sirve.
+    if ((await fsp.stat(tmp)).size === 0) throw gError('El video compartido en Google Drive está vacío.');
     await fsp.rename(tmp, dest);
   } catch (e) {
     await fsp.unlink(tmp).catch(() => {});
