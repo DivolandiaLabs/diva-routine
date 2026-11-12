@@ -10,6 +10,7 @@ import { renderClassPlay } from './classplay.js';
 import { openSettings } from './settings.js';
 import { maybeWelcome } from './welcome.js';
 import { installTouchDrag } from './touchdrag.js';
+import { lockGate } from './lock.js';
 
 installTouchDrag(); // arrastrar con el dedo en el móvil
 
@@ -88,6 +89,7 @@ window.addEventListener('store', (e) => {
 });
 
 (async function init() {
+  await lockGate(); // PIN o contraseña de este dispositivo, si se ha puesto en Ajustes
   try {
     await refresh();
   } catch (e) {

@@ -26,6 +26,8 @@ App local para montar rutinas de entrenamiento de jazz a partir de videos y foto
 
 En la tabla de una rutina, el botón **IA** de cada fila mejora con IA las viñetas que hayas marcado en esa fila; si no marcas ninguna, mejora toda la secuencia (función Premium, gasta créditos). En el video, el selector **Velocidad** va de ×0,1 a ×4 y recuerda la última elegida.
 
+**Bloqueo**: en **Ajustes → Bloqueo** puedes pedir un PIN o una contraseña para entrar en la app. Solo afecta al dispositivo donde lo activas, y puede volver a pedirse tras unos minutos fuera de la app.
+
 Las viñetas tienen estilo de póster de ejercicios: en cada **fase** del movimiento (Inicio → Fase 2 → … → Final) se toma el fotograma real, se recorta a la persona (sin fondo) y se pasa a ilustración (colores planos, líneas de tinta y contorno), sobre fondo blanco, con flechas verdes entre fases y todas a la misma escala. La tabla de la rutina se separa en secciones de colores por categoría. Si alguna viñeta no se puede hacer, se usa una figura dibujada a partir de la pose (lado derecho en color fuerte, izquierdo en claro).
 
 ## Versión web

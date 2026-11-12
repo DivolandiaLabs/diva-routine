@@ -1875,6 +1875,7 @@ async function handleApi(req, res, parts) {
           if (dur) item.dur = dur;
           if (end != null && (start == null || end > start)) item.end = end;
           if (secs) item.secs = secs;
+          if (v.skip === true) item.skip = true; // excluido de la clase
           if (Object.keys(item).length) out[key] = item;
         }
         lib.classItems = out;

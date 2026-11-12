@@ -25,6 +25,7 @@ Everything stays on your computer. Optionally, sign in with Google to keep your 
 - **Google sign-in & sync**: your data mirrored to a private folder in your Google Drive (free up to 15 GB).
 - **Collaboration** (Firebase): shared folders where collaborators can add videos, routines with several editors, and shared drawings.
 - **Web version** at [divolandialabs.github.io/diva-routine/app](https://divolandialabs.github.io/diva-routine/app/): runs in any browser, on desktop or phone, with nothing to install; data stays in that browser and syncs with your Google account.
+- **Lock**: under Settings → Lock, ask for a PIN or password to open the app. It only applies to the device where you turn it on, and can ask again after a few minutes away.
 - **Windows installer with automatic updates**: new versions are downloaded in the background and installed with one click.
 
 ## Installation

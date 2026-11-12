@@ -3,7 +3,7 @@
 // Cada opción abre su panel entre la cuadrícula y el menú.
 import { api as baseApi, createApi } from './api.js';
 import { mountMega, openMegaPicker } from './mega.js';
-import { isClass, classItems, itemType, playable, totalSecs, itemSecs, clock, chipText, openSegment, openSecs, rememberDuration } from './classtime.js';
+import { isClass, classItems, itemType, playable, skipped, inPlay, setSkipped, totalSecs, itemSecs, clock, chipText, openSegment, openSecs, rememberDuration } from './classtime.js';
 const historyOwner = (() => {
   try {
     const id = sessionStorage.getItem('jr-library-undo') || crypto.randomUUID();
@@ -881,13 +881,20 @@ export function renderLibrary(root, libraryId) {
     const items = classItems(lib);
     bar.hidden = false;
     bar.innerHTML = `
-      <a class="btn primary" href="#/clase/${lib.id}" ${items.some(playable) ? '' : 'aria-disabled="true"'}>▶ Reproducir clase</a>
+      <a class="btn primary" href="#/clase/${lib.id}" ${items.some((it) => inPlay(lib, it)) ? '' : 'aria-disabled="true"'}>▶ Reproducir clase</a>
       <span class="class-total"><span>Duración total</span> <b id="classTotal">…</b></span>`;
     const run = ++classTotalRun;
     totalSecs(lib).then((t) => run === classTotalRun && $('#classTotal') && ($('#classTotal').textContent = clock(t)));
     for (const it of items) {
       const tile = $(`#grid .tile[data-kind="${it.kind}"][data-id="${it.x.id}"]`);
       if (!tile || tile.querySelector('.cls-chip')) continue;
+      const off = skipped(lib, it);
+      tile.classList.toggle('cls-off', off);
+      tile.insertAdjacentHTML('beforeend', `<button class="cls-skip${off ? ' on' : ''}" data-cls-skip="${it.x.id}" title="${off ? 'Volver a incluir en la clase' : 'Excluir de la clase: se queda en la carpeta, pero no se reproduce'}" aria-pressed="${off}">${off ? '↺' : '⊘'}</button>`);
+      if (off) {
+        tile.insertAdjacentHTML('beforeend', '<button class="cls-chip" disabled title="No se reproduce en la clase">Excluido</button>');
+        continue;
+      }
       const ok = playable(it);
       const type = itemType(it);
       tile.insertAdjacentHTML('beforeend', `<button class="cls-chip" data-cls-time="${it.kind}:${it.x.id}" ${ok ? '' : 'disabled'} title="${!ok ? 'Sin descargar: no entra en la clase' : type === 'video' ? 'Elegir el tramo que se reproduce en la clase' : 'Elegir cuánto tiempo se ve en la clase'}">⏱ ${ok ? esc(chipText(lib, it)) : 'Sin archivo'}</button>`);
@@ -1833,6 +1840,14 @@ export function renderLibrary(root, libraryId) {
       // Se va al video a elegir el tramo (el enlace navega); al volver, el panel sigue abierto.
       ui.returnToDraw = pick.dataset.pickSeg;
       return;
+    }
+    // Excluir de la clase (o volver a incluir).
+    const clsSkip = t.closest('[data-cls-skip]');
+    if (clsSkip && isClass(folder)) {
+      e.preventDefault();
+      const lib = libraryById(folder.id);
+      const id = clsSkip.dataset.clsSkip;
+      return setSkipped(lib, id, !lib.classItems?.[id]?.skip);
     }
     const clsTime = t.closest('[data-cls-time]');
     if (clsTime && isClass(folder)) {

@@ -26,6 +26,15 @@ export function classItems(lib) {
 // 'video' también vale para los archivos de audio: se reproduce su tramo igual.
 export const itemType = (it) => (it.kind === 'routine' ? 'routine' : it.x.source?.platform === 'spotify' ? 'spotify' : it.x.source?.mediaType === 'image' ? 'image' : 'video');
 export const playable = (it) => it.kind === 'routine' || it.x.source?.platform === 'spotify' || Boolean(it.x.source?.file);
+/** Excluido de la clase: sigue en la carpeta, pero no suena ni cuenta en la duración. */
+export const skipped = (lib, it) => Boolean(lib.classItems?.[it.x.id]?.skip);
+export const inPlay = (lib, it) => playable(it) && !skipped(lib, it);
+/** Excluye (o vuelve a incluir) un elemento, sin tocar su tramo ni su tiempo. */
+export async function setSkipped(lib, id, on) {
+  const { skip, ...set } = lib.classItems?.[id] || {};
+  const value = on ? { ...set, skip: true } : set;
+  await save(lib, id, Object.keys(value).length ? value : null);
+}
 
 // Duración de cada archivo de video, leída una vez de sus datos (sin descargar nada más).
 const durations = new Map();
@@ -55,7 +64,7 @@ export async function segmentOf(lib, v) {
 
 /** Segundos que ocupa una cosa en la clase (0 si no se puede reproducir). */
 export async function itemSecs(lib, it) {
-  if (!playable(it)) return 0;
+  if (!inPlay(lib, it)) return 0;
   const type = itemType(it);
   if (type === 'video' || type === 'spotify') {
     const { start, end } = await segmentOf(lib, it.x);

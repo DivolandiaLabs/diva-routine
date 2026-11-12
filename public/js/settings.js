@@ -10,6 +10,7 @@ import { openNet, NET_INFO } from './redes.js';
 import { CLOUDS, NET_ICON, SAVED_HINT, ICON_IG, spotifyCard } from './library.js';
 import { esc, toast, sleep, ask, state, emit, modelPicker, styleTiles, chooseAi, ui, shelves, shelfName, libraryById, upsert, queueDownload, canDownload } from './store.js';
 import { LANGS, lang, setLang, tr } from './i18n.js';
+import { lockConfig, setLock, clearLock, checkSecret, setLockAfter, validSecret, lockNow } from './lock.js';
 
 const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 // Atajos de teclado y ratón de toda la app, por apartados.
@@ -62,6 +63,7 @@ const ICON = {
   keys: svg('<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'),
   theme: svg('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.9 2-2 0-.6-.3-1-.6-1.4-.3-.4-.6-.8-.6-1.3 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.2-4-7.5-9-7.5z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>'),
   backup: svg('<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 10h16M10 14h4"/>'),
+  lock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
   about: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
 };
 
@@ -424,6 +426,99 @@ function mountSettings(root, section) {
         </button>`).join('')}</div>`;
   };
 
+  // ---------- bloqueo con PIN o contraseña (solo este dispositivo) ----------
+
+  const LOCK_AFTER = [[0, 'Solo al abrir la app'], [1, 'Tras 1 minuto fuera'], [5, 'Tras 5 minutos fuera'], [15, 'Tras 15 minutos fuera']];
+  let lockEdit = null; // null, 'pin' o 'password': formulario abierto para poner o cambiar
+  const drawLock = () => {
+    const box = root.querySelector('#lockCard');
+    if (!box) return;
+    const c = lockConfig();
+    const numeric = (kind) => (kind === 'pin' ? 'inputmode="numeric" pattern="[0-9]*" maxlength="8"' : '');
+    const form = (kind) => `<form class="lock-form" data-lock-form="${kind}" autocomplete="off">
+        ${c ? `<label class="field">${c.kind === 'pin' ? 'PIN actual' : 'Contraseña actual'}<input name="old" type="password" autocomplete="current-password" ${numeric(c.kind)}></label>` : ''}
+        <label class="field">${kind === 'pin' ? 'Nuevo PIN (de 4 a 8 cifras)' : 'Nueva contraseña (6 caracteres o más)'}<input name="a" type="password" autocomplete="new-password" ${numeric(kind)}></label>
+        <label class="field">Repítelo<input name="b" type="password" autocomplete="new-password" ${numeric(kind)}></label>
+        <div class="row wrap"><button class="btn primary" type="submit">Guardar</button><button class="btn ghost" type="button" data-lock="cancel">Cancelar</button></div>
+      </form>`;
+    const on = c ? `
+      <dl class="set-list"><dt>Estado</dt><dd><b>${c.kind === 'pin' ? 'Activado con PIN' : 'Activado con contraseña'}</b></dd></dl>
+      <label class="field">Volver a pedirlo
+        <select id="lockAfter">${LOCK_AFTER.map(([m, label]) => `<option value="${m}" ${m === (c.after || 0) ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      ${lockEdit ? form(lockEdit) : `<div class="row wrap">
+        <button class="btn" data-lock="lock-now">Bloquear ahora</button>
+        <button class="btn" data-lock="pin">Cambiar a un PIN nuevo</button>
+        <button class="btn" data-lock="password">Cambiar a una contraseña nueva</button>
+        <button class="btn ghost danger" data-lock="off">Quitar el bloqueo</button></div>`}` : lockEdit ? form(lockEdit) : `<div class="row wrap">
+        <button class="btn primary" data-lock="pin">Poner un PIN</button>
+        <button class="btn" data-lock="password">Poner una contraseña</button></div>`;
+    box.innerHTML = `
+      <h3>Bloqueo</h3>
+      <p>Pide un PIN o una contraseña para entrar en la app. Solo afecta a este dispositivo: en tus otros ordenadores y móviles sigue igual.</p>
+      ${on}
+      <p class="hint">Si lo olvidas no se puede recuperar: habría que borrar los datos guardados de la app en este dispositivo. Protege la pantalla de la app; los archivos del ordenador no se cifran.</p>`;
+    box.querySelector('[data-lock-form] input')?.focus();
+  };
+  root.addEventListener('click', async (e) => {
+    const act = e.target.closest('[data-lock]')?.dataset.lock;
+    if (!act) return;
+    if (act === 'pin' || act === 'password') lockEdit = act;
+    else if (act === 'cancel') lockEdit = null;
+    else if (act === 'lock-now') return lockNow();
+    else if (act === 'off') {
+      const c = lockConfig();
+      const typed = await askSecret(c.kind === 'pin' ? 'Escribe tu PIN para quitar el bloqueo' : 'Escribe tu contraseña para quitar el bloqueo', c.kind);
+      if (typed === null) return;
+      if (!await checkSecret(typed)) return toast(c.kind === 'pin' ? 'PIN incorrecto' : 'Contraseña incorrecta', 'error');
+      clearLock();
+      toast('Bloqueo quitado en este dispositivo');
+    }
+    drawLock();
+  });
+  root.addEventListener('submit', async (e) => {
+    const f = e.target.closest('[data-lock-form]');
+    if (!f) return;
+    e.preventDefault();
+    const kind = f.dataset.lockForm;
+    const c = lockConfig();
+    const { old, a, b } = f.elements;
+    if (c && !await checkSecret(old.value)) return toast(c.kind === 'pin' ? 'El PIN actual no es correcto' : 'La contraseña actual no es correcta', 'error');
+    if (!validSecret(kind, a.value)) return toast(kind === 'pin' ? 'El PIN debe tener de 4 a 8 cifras' : 'La contraseña debe tener al menos 6 caracteres', 'error');
+    if (a.value !== b.value) return toast('No coinciden: escríbelo igual las dos veces', 'error');
+    await setLock(kind, a.value, c?.after || 0);
+    lockEdit = null;
+    toast(kind === 'pin' ? 'PIN guardado en este dispositivo' : 'Contraseña guardada en este dispositivo');
+    drawLock();
+  });
+  root.addEventListener('change', (e) => {
+    if (e.target.id === 'lockAfter') setLockAfter(+e.target.value);
+  });
+  // Pide el PIN o la contraseña en un cuadro pequeño. Devuelve lo escrito, o null si se cancela.
+  function askSecret(title, kind) {
+    return new Promise((resolve) => {
+      const d = document.createElement('dialog');
+      d.className = 'lock-ask';
+      d.innerHTML = `<form method="dialog" class="lock-form"><p><b>${esc(title)}</b></p>
+        <input name="s" type="password" autocomplete="current-password" ${kind === 'pin' ? 'inputmode="numeric"' : ''}>
+        <div class="row wrap"><button class="btn primary" value="ok">Aceptar</button><button class="btn ghost" value="">Cancelar</button></div></form>`;
+      document.body.appendChild(d);
+      const done = (value) => {
+        d.close();
+        d.remove();
+        resolve(value);
+      };
+      d.querySelector('form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        done(e.submitter?.value === 'ok' ? d.querySelector('input').value : null);
+      });
+      d.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        done(null);
+      });
+      d.showModal();
+    });
+  }
+
   // ---------- idiomas ----------
 
   const drawLanguage = () => {
@@ -511,6 +606,7 @@ function mountSettings(root, section) {
       <p class="hint">Si la ocultas por completo, sus botones (Subir, Mover, Borrar…) no estarán disponibles hasta que la vuelvas a mostrar.</p>
     </section>` },
     { id: 'keys', label: 'Atajos de teclado', icon: ICON.keys, html: keysPane() },
+    { id: 'lock', label: 'Bloqueo', icon: ICON.lock, html: '<section class="set-card" id="lockCard"></section>' },
     { id: 'theme', label: 'Temas', icon: ICON.theme, html: '<section class="set-card" id="themeCard"></section>' },
     { id: 'backup', label: 'Backups', icon: ICON.backup, html: '<section class="set-card" id="backupCard"></section>' },
     { id: 'folder', label: 'Carpeta compartida', icon: ICON.folder, html: folderPane() },
@@ -623,6 +719,7 @@ function mountSettings(root, section) {
       drawPremium();
       drawLanguage();
       drawTheme();
+      drawLock();
       drawBackup();
       drawDrive();
       const slot = root.querySelector('[data-mega-slot]');

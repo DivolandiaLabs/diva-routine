@@ -2,7 +2,7 @@
 // Videos: solo su tramo. Fotos y rutinas: el tiempo elegido en la clase.
 import { esc, toast, upsert, libraryById, exerciseById, itemExercise, exerciseFigure, mountSpotify } from './store.js';
 import { api } from './api.js';
-import { classItems, itemType, playable, segmentOf, itemSecs, clock, rememberDuration } from './classtime.js';
+import { classItems, itemType, inPlay, segmentOf, itemSecs, clock, rememberDuration } from './classtime.js';
 
 export function renderClassPlay(root, id) {
   const lib = libraryById(id);
@@ -10,7 +10,7 @@ export function renderClassPlay(root, id) {
     root.innerHTML = '<div class="empty-state"><h2>Esta clase ya no existe</h2></div>';
     return null;
   }
-  const items = classItems(lib).filter(playable);
+  const items = classItems(lib).filter((it) => inPlay(lib, it));
   root.innerHTML = `
     <div class="cls-play">
       <header class="cls-head">
@@ -365,7 +365,7 @@ export function renderClassPlay(root, id) {
     drawList();
     // Se guarda como el orden de la clase («Mi orden»); lo que no se puede reproducir conserva su hueco.
     const queue = [...items];
-    const full = classItems(lib).map((x) => (playable(x) ? queue.shift() : x)).map((x) => ({ kind: x.kind, id: x.x.id }));
+    const full = classItems(lib).map((x) => (inPlay(lib, x) ? queue.shift() : x)).map((x) => ({ kind: x.kind, id: x.x.id }));
     try {
       const r = await api.orderItems(full, lib.id);
       r.videos.forEach((v) => upsert('videos', v));
