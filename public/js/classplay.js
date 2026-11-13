@@ -65,9 +65,12 @@ export function renderClassPlay(root, id) {
   let volume = 1;
   let mirror = false; // imagen invertida, como un espejo (se recuerda)
   try { mirror = localStorage.getItem('jr-mirror') === '1'; } catch { /* sin almacenamiento */ }
-  // Barra: 'item' (el elemento que suena entero, con su tramo en rojo) o 'all' (toda la clase).
+  // Barra: 'item' (el archivo que suena entero, con su tramo en rojo), 'clip' (solo el tramo que
+  // suena, de punta a punta) o 'all' (toda la clase). El conmutador pasa de una a otra en ese orden.
+  const BAR_MODES = ['item', 'clip', 'all'];
   let barMode = 'item';
-  try { barMode = localStorage.getItem('jr-cls-bar') === 'all' ? 'all' : 'item'; } catch { /* sin almacenamiento */ }
+  try { barMode = BAR_MODES.includes(localStorage.getItem('jr-cls-bar')) ? localStorage.getItem('jr-cls-bar') : 'item'; } catch { /* sin almacenamiento */ }
+  const nextBarMode = () => BAR_MODES[(BAR_MODES.indexOf(barMode) + 1) % BAR_MODES.length];
   let rate = 1; // velocidad: videos, audios, y el tiempo de fotos y rutinas
   // Bucle: repite el elemento que suena (o, en videos y audios, solo de A a B).
   let loop = false;
@@ -98,20 +101,26 @@ export function renderClassPlay(root, id) {
   /** Dónde cae en la barra (en %) un instante del elemento que suena. */
   const pct = (t) => {
     if (barMode === 'all') return total ? ((before(index) + Math.max(0, t - segStart())) / total) * 100 : 0;
+    if (barMode === 'clip') {
+      const span = segEnd() - segStart();
+      return span > 0 ? Math.max(0, Math.min(100, ((t - segStart()) / span) * 100)) : 0;
+    }
     const len = itemLen();
     return len ? Math.max(0, Math.min(100, (t / len) * 100)) : 0;
   };
   const BAR_ICON = {
     item: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h18" opacity=".35"/><path d="M8 12h8" stroke-width="4"/></svg>',
+    clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7v10M20 7v10"/><path d="M7.5 12h9" stroke-width="4"/></svg>',
     all: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3 12h4M10 12h4M17 12h4"/></svg>',
   };
   const drawBarMode = () => {
     const b = $('#clsBarMode');
     b.innerHTML = BAR_ICON[barMode];
-    b.classList.toggle('on', barMode === 'all');
-    b.title = barMode === 'item'
-      ? 'La barra muestra este elemento, con su tramo en rojo. Pulsa para ver toda la clase (T)'
-      : 'La barra muestra toda la clase. Pulsa para ver solo este elemento, con su tramo en rojo (T)';
+    b.title = {
+      item: 'La barra muestra este video entero, con su tramo en rojo. Pulsa para ver solo el tramo que suena (T)',
+      clip: 'La barra muestra solo el tramo de este video que se reproduce. Pulsa para ver toda la clase (T)',
+      all: 'La barra muestra toda la clase. Pulsa para ver este video entero, con su tramo en rojo (T)',
+    }[barMode];
     const ticks = $('#clsTicks');
     ticks.hidden = barMode !== 'all';
     ticks.innerHTML = barMode === 'all' && total ? items.slice(1).map((_, i) => `<i style="left:${(before(i + 1) / total) * 100}%"></i>`).join('') : '';
@@ -478,7 +487,7 @@ export function renderClassPlay(root, id) {
     else if (act === 'fwd') seek(10);
     else if (act === 'full') fullscreen();
     else if (act === 'mirror') setMirror(!mirror);
-    else if (act === 'barmode') setBarMode(barMode === 'item' ? 'all' : 'item');
+    else if (act === 'barmode') setBarMode(nextBarMode());
     else if (act === 'loop') setLoop(!loop);
     else if (act === 'loopA') markLoop('A');
     else if (act === 'loopB') markLoop('B');
@@ -499,6 +508,7 @@ export function renderClassPlay(root, id) {
     const f = barFrac(e);
     if (f === null) return;
     if (barMode === 'all') seekTo(f * total, jump);
+    else if (barMode === 'clip') seekItem(segStart() + f * (segEnd() - segStart()));
     else seekItem(f * itemLen());
   };
   let scrubbing = false;
@@ -525,7 +535,7 @@ export function renderClassPlay(root, id) {
     else if (e.key === 'ArrowLeft') e.shiftKey ? seek(-10) : show(index - 1);
     else if (e.key === 'f' || e.key === 'F') fullscreen();
     else if (e.key === 'm' || e.key === 'M') setMirror(!mirror);
-    else if (e.key === 't' || e.key === 'T') setBarMode(barMode === 'item' ? 'all' : 'item');
+    else if (e.key === 't' || e.key === 'T') setBarMode(nextBarMode());
     else if (e.key === 'l' || e.key === 'L') setLoop(!loop);
     else if (e.key === 'a' || e.key === 'A') markLoop('A');
     else if (e.key === 'b' || e.key === 'B') markLoop('B');
