@@ -506,6 +506,8 @@ function spotifyControls(el) {
   const queue = [];
   const post = (msg) => frame.contentWindow?.postMessage(msg, 'https://open.spotify.com');
   const send = (msg) => (ready ? post(msg) : queue.push(msg));
+  let vol = 1;
+  const sendVolume = () => post({ command: 'jr-volume', value: vol });
   const draw = () => {
     btn.textContent = paused ? '▶' : '❚❚';
     btn.title = btn.ariaLabel = tr(paused ? 'Reproducir' : 'Pausa');
@@ -521,6 +523,8 @@ function spotifyControls(el) {
     paused: { get: () => paused },
     currentTime: { get: () => pos, set: (t) => ((pos = Math.max(0, t)), send({ command: 'seek', timestamp: pos })) },
   });
+  // En la web Spotify no deja tocar su volumen; en la app de escritorio, sí (ver desktop/main.js).
+  if (/Electron/i.test(navigator.userAgent)) Object.defineProperty(media, 'volume', { get: () => vol, set: (v) => ((vol = Math.max(0, Math.min(1, +v || 0))), sendVolume()) });
   // La primera vez «play» (empieza); después «resume» (sigue donde estaba).
   media.play = () => (paused ? send({ command: started ? 'resume' : 'play' }) : null, Promise.resolve());
   media.pause = () => !paused && send({ command: 'pause' });
@@ -532,6 +536,7 @@ function spotifyControls(el) {
       ready = true;
       post({ command: 'load_complete_ack' });
       queue.splice(0).forEach(post);
+      sendVolume();
     }
     if ((type === 'playback_update' || type === 'playback_started') && payload) {
       const hadDur = dur > 0;
@@ -544,6 +549,7 @@ function spotifyControls(el) {
       if (!hadDur && dur > 0) fire('loadedmetadata');
       fire('timeupdate');
       if (wasPaused !== paused) fire(paused ? 'pause' : 'play');
+      if (wasPaused && !paused) sendVolume(); // por si el audio de Spotify se acaba de crear
       if (paused && dur && pos >= dur - 0.5) fire('ended');
     }
   };

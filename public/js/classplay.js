@@ -21,7 +21,7 @@ export function renderClassPlay(root, id) {
       <div class="cls-screen" id="clsScreen">
       <div class="cls-stage" id="clsStage"></div>
       <div class="cls-overlay">
-      <div class="cls-seek" id="clsSeek" title="Haz clic (o arrastra) para ir a ese momento"><div class="cls-bar"><span class="cls-segmark" id="clsSeg" hidden></span><div id="clsProgress"></div><span class="cls-loopmark" id="clsLoopMark" hidden></span><span class="cls-ticks" id="clsTicks"></span></div></div>
+      <div class="cls-seek" id="clsSeek" aria-label="Haz clic (o arrastra) para ir a ese momento"><span class="cls-hover" id="clsHover" hidden></span><div class="cls-bar"><span class="cls-hoverline" id="clsHoverLine" hidden></span><span class="cls-segmark" id="clsSeg" hidden></span><div id="clsProgress"></div><span class="cls-loopmark" id="clsLoopMark" hidden></span><span class="cls-ticks" id="clsTicks"></span></div></div>
       <div class="cls-controls">
         <button class="btn" data-cls="prev" title="Elemento anterior (←)">⏮</button>
         <button class="btn" data-cls="back" title="10 s atrás (Mayús + ←)">⟲10</button>
@@ -230,6 +230,7 @@ export function renderClassPlay(root, id) {
     drawList();
     drawLoop();
     const stage = $('#clsStage');
+    drawVol();
     if (type === 'video') {
       segment = await segmentOf(lib, it.x);
       if (gone || items[index] !== it) return;
@@ -266,6 +267,8 @@ export function renderClassPlay(root, id) {
       if (gone || items[index] !== it) return;
       if (!media) return; // lista personal o privada: se ve el aviso y se pasa con ⏭
       video = media;
+      if ('volume' in media) media.volume = volume;
+      drawVol();
       const set = lib.classItems?.[it.x.id] || {};
       media.addEventListener('loadedmetadata', () => {
         // Sin fin elegido, la canción entera (la que diga Spotify).
@@ -511,6 +514,33 @@ export function renderClassPlay(root, id) {
     else if (barMode === 'clip') seekItem(segStart() + f * (segEnd() - segStart()));
     else seekItem(f * itemLen());
   };
+  // Al pasar el cursor por la barra: el momento del video que hay ahí (en toda la clase, el
+  // momento de la clase y el elemento que toca).
+  const hoverTip = $('#clsHover');
+  const hoverLine = $('#clsHoverLine');
+  const hideHover = () => ((hoverTip.hidden = true), (hoverLine.hidden = true));
+  const showHover = (e) => {
+    const f = barFrac(e);
+    if (f === null || !total) return hideHover();
+    let text;
+    if (barMode === 'all') {
+      const t = f * total;
+      let i = 0;
+      while (i < items.length - 1 && before(i + 1) <= t) i++;
+      text = `${clock(t)} · ${nameOf(items[i])} ${clock(t - before(i))}`;
+    } else if (barMode === 'clip') text = clock(segStart() + f * (segEnd() - segStart()));
+    else text = clock(f * itemLen());
+    hoverTip.textContent = text;
+    hoverTip.hidden = false;
+    hoverLine.hidden = false;
+    hoverLine.style.left = `${f * 100}%`;
+    // Centrada en el cursor, sin salirse por los lados.
+    const w = seekBar.clientWidth;
+    const half = hoverTip.offsetWidth / 2;
+    hoverTip.style.left = `${Math.max(half, Math.min(w - half, f * w))}px`;
+  };
+  seekBar.addEventListener('pointermove', showHover);
+  seekBar.addEventListener('pointerleave', () => !scrubbing && hideHover());
   let scrubbing = false;
   seekBar.addEventListener('pointerdown', (e) => {
     if (!total || e.button > 0) return;
@@ -525,6 +555,7 @@ export function renderClassPlay(root, id) {
     if (!scrubbing) return;
     scrubbing = false;
     barSeek(e);
+    if (e.pointerType !== 'mouse') hideHover(); // en pantallas táctiles no hay «pasar por encima»
   };
   seekBar.addEventListener('pointerup', endScrub);
   seekBar.addEventListener('pointercancel', () => (scrubbing = false));
@@ -542,6 +573,13 @@ export function renderClassPlay(root, id) {
   };
   document.addEventListener('keydown', onKey);
   $('#clsSpeed').addEventListener('change', (e) => setRate(+e.target.value));
+  /** El volumen se puede mover salvo con Spotify en la web, que no lo deja (se usa el del aparato). */
+  function drawVol() {
+    const ok = !video || 'volume' in video;
+    const input = $('#clsVol');
+    input.disabled = !ok;
+    input.closest('.cls-vol').title = ok ? 'Volumen' : 'Spotify no deja cambiar su volumen en la web: usa el del ordenador o el móvil (en la app de escritorio sí se puede)';
+  }
   $('#clsVol').addEventListener('input', (e) => {
     volume = +e.target.value;
     if (video && 'volume' in video) video.volume = volume;

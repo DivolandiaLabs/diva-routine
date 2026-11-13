@@ -4,7 +4,7 @@
 //   copian ahí la primera vez (así, quien la instala ya puede iniciar sesión y compartir).
 // - Se actualiza sola: mira si hay una versión publicada más nueva, la baja en segundo plano y
 //   avisa (notificación de Windows y aviso en la app) para instalarla con un clic.
-import { app, BrowserWindow, Notification, shell, dialog, safeStorage } from 'electron';
+import { app, BrowserWindow, Notification, shell, dialog, safeStorage, webFrameMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,25 @@ const ICON = path.join(HERE, 'icon.png');
 const EVERY = 3 * 3600e3; // cada cuánto se mira si hay versión nueva (y al abrir)
 
 app.setAppUserModelId('com.divolandia.jazzrutinas'); // para las notificaciones de Windows
+
+/** Lo que se pone en el reproductor de Spotify para que obedezca al volumen de la app. */
+const SPOTIFY_VOLUME = `(() => {
+  if (window.__jrVolume) return;
+  window.__jrVolume = true;
+  let level = 1;
+  const seen = new Set();
+  const apply = (m) => { try { if (Math.abs(m.volume - level) > 0.001) m.volume = level; } catch {} };
+  const all = () => { document.querySelectorAll('audio, video').forEach((m) => seen.add(m)); seen.forEach(apply); };
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...args) { seen.add(this); apply(this); return play.apply(this, args); };
+  document.addEventListener('playing', (e) => { if (e.target instanceof HTMLMediaElement) { seen.add(e.target); apply(e.target); } }, true);
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (e.source !== window.parent || !d || d.command !== 'jr-volume') return;
+    level = Math.max(0, Math.min(1, Number(d.value) || 0));
+    all();
+  });
+})();`;
 
 if (!app.requestSingleInstanceLock()) {
   // Ya estaba abierta: se enseña esa ventana (ver 'second-instance').
@@ -177,6 +196,15 @@ function start() {
       }
       openOutside(url);
       return { action: 'deny' };
+    });
+    // Volumen de Spotify: su reproductor incrustado no tiene orden de volumen. En su marco se pone un
+    // oyente que recibe el volumen de la app (solo de la página que lo contiene) y lo aplica a su audio.
+    win.webContents.on('did-frame-finish-load', (e, isMain, processId, routingId) => {
+      if (isMain) return;
+      try {
+        const frame = webFrameMain.fromId(processId, routingId);
+        if (frame?.origin === 'https://open.spotify.com') frame.executeJavaScript(SPOTIFY_VOLUME).catch(() => {});
+      } catch { /* el marco ya no está */ }
     });
     // Sin menú: F5 recarga y F12 abre las herramientas (por si hay que mirar un fallo).
     win.webContents.on('before-input-event', (e, input) => {

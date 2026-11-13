@@ -921,7 +921,7 @@ body.login-mode .topbar { display: none; }
   border: 2px solid var(--accent); background: var(--surface); font-weight: 600; font-size: 0.95rem; box-shadow: var(--shadow);
 }
 .view-list .tile-rename, .view-details .tile-rename { left: 92px; bottom: auto; top: 50%; transform: translateY(-50%); }
-.tile.renaming .card-rename, .tile.renaming .card-del { visibility: hidden; }
+.tile.renaming .card-rename, .tile.renaming .card-del, .tile.renaming .card-menu, .tile.renaming .card-flags { visibility: hidden; }
 .name-edit { cursor: text; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; }
 .name-edit:hover { text-decoration: underline dotted color-mix(in srgb, var(--accent) 70%, transparent); text-underline-offset: 3px; }
 .saved-progress { display: grid; gap: 6px; margin: 6px 0 10px; }
@@ -1035,7 +1035,7 @@ body.pill-moving, body.pill-moving * { cursor: grabbing !important; user-select:
 .tile:hover .card-pin, .card-pin:focus-visible { opacity: 1; }
 .card-pin:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 .card-pin.on { opacity: 1; background: var(--accent); border-color: var(--accent); color: #fff; transform: rotate(-20deg); }
-.tile:has(.card-pin.on) { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.tile:has(.card-pin.on), .tile.pinned { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .view-list .card-pin, .view-details .card-pin { top: 50%; transform: translateY(-50%); right: 44px; }
 .view-list .card-pin.on, .view-details .card-pin.on { transform: translateY(-50%) rotate(-20deg); }
 /* acceso directo a lo anclado (como los mensajes fijados de Telegram): salta, resalta y hace scroll.
@@ -1074,7 +1074,7 @@ body.tile-moving, body.tile-moving * { cursor: grabbing !important; user-select:
   position: fixed; left: 0; top: 0; z-index: 300; pointer-events: none; margin: 0 !important;
   opacity: 0.92; box-shadow: 0 18px 40px rgb(0 0 0 / 0.5); border-radius: 16px; transition: none;
 }
-.tile-ghost .card-del, .tile-ghost .card-pin, .tile-ghost .sel { display: none; }
+.tile-ghost .card-del, .tile-ghost .card-pin, .tile-ghost .card-menu, .tile-ghost .card-flags, .tile-ghost .sel { display: none; }
 .ghost-count { position: absolute; top: -10px; right: -10px; min-width: 34px; height: 34px; border-radius: 17px; display: grid; place-items: center; background: var(--accent); color: #fff; font-size: 1.1rem; box-shadow: 0 2px 8px rgb(0 0 0 / 0.4); }
 /* rutinas en la cuadrícula: a la misma altura que las carpetas (que llevan su pestaña arriba) */
 .tiles:not(.view-list):not(.view-details) .tile-routine { margin-top: 9px; }
@@ -1277,7 +1277,7 @@ dialog.mega-pick footer .hint { margin-right: auto; }
 /* ---------- clases: carpetas que se reproducen seguidas ---------- */
 /* La clase no parece una carpeta: sin pestaña, de otro color, con borde grueso y hojas apiladas
    detrás, como una lista de reproducción. */
-.tile.tile-class, .tile.tile-class:has(.card-pin.on) {
+.tile.tile-class, .tile.tile-class:has(.card-pin.on), .tile.tile-class.pinned {
   --class: #2bb3a3;
   margin-top: 0; border: 1px solid color-mix(in srgb, var(--class) 70%, transparent); border-radius: 16px; box-shadow: var(--shadow);
 }
@@ -1613,7 +1613,7 @@ dialog.cls-dlg h3 { padding-right: 36px; }
 }
 .cls-bar > #clsProgress { position: relative; z-index: 1; }
 /* Barra de progreso de la clase: se puede pulsar o arrastrar para ir a un momento */
-.cls-seek { padding: 8px 0; margin: -8px 0; cursor: pointer; touch-action: none; }
+.cls-seek { position: relative; padding: 8px 0; margin: -8px 0; cursor: pointer; touch-action: none; }
 .cls-seek:hover .cls-bar { height: 9px; }
 .cls-bar { transition: height .15s; }
 
@@ -1636,7 +1636,7 @@ dialog.cls-dlg h3 { padding-right: 36px; }
 .tile:hover .cls-skip, .cls-skip:focus-visible, .cls-skip.on { opacity: 1; }
 .cls-skip:hover, .cls-skip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 @media (hover: none) { .cls-skip { opacity: 1; } }
-.tile.cls-off > :not(.cls-skip):not(.sel):not(.card-del):not(.card-pin) { opacity: 0.4; filter: grayscale(1); }
+.tile.cls-off > :not(.cls-skip):not(.sel):not(.card-del):not(.card-pin):not(.card-menu):not(.card-flags) { opacity: 0.4; filter: grayscale(1); }
 .view-list .cls-skip, .view-details .cls-skip { position: static; flex: none; margin-right: 6px; }
 /* Bloqueo con PIN o contraseña (solo este dispositivo) */
 .lock-screen { position: fixed; inset: 0; z-index: 10000; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 16px; }
@@ -1660,3 +1660,39 @@ html.locked body > :not(.lock-screen):not(script) { visibility: hidden; }
 .cls-ticks i { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #000a; }
 .cls-barmode svg { width: 20px; height: 20px; display: block; }
 .cls-barmode.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Opciones de un recuadro (pin, carátula, borrar): el botón ⋮ arriba a la derecha y su menú.
+   Lo que está puesto (pin, carátula) se ve siempre a su lado. */
+.card-menu {
+  position: absolute; top: 8px; right: 8px; z-index: 2; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.15s;
+}
+.card-menu svg { width: 16px; height: 16px; }
+.tile:hover .card-menu, .card-menu:focus-visible, .tile.menu-open .card-menu { opacity: 1; }
+.card-menu:hover, .tile.menu-open .card-menu { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (hover: none) { .card-menu { opacity: 1; } }
+.card-flags { position: absolute; top: 8px; right: 42px; z-index: 2; display: flex; gap: 6px; }
+.card-flag { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; padding: 0; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+.card-flag svg { width: 15px; height: 15px; }
+.card-flag.flag-pin svg { transform: rotate(-20deg); }
+.card-flag:hover { filter: brightness(1.12); }
+.view-list .card-menu, .view-details .card-menu, .view-list .card-flags, .view-details .card-flags { top: 50%; transform: translateY(-50%); }
+.view-list .card-flags, .view-details .card-flags { right: 44px; }
+.card-pop {
+  position: fixed; z-index: 1000; min-width: 230px; padding: 6px; display: grid; gap: 2px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+}
+.card-pop button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 0.9rem; text-align: left; cursor: pointer; }
+.card-pop button svg { flex: none; width: 17px; height: 17px; color: var(--muted); }
+.card-pop button:hover, .card-pop button:focus-visible { background: var(--accent-soft); outline: none; }
+.card-pop button.danger { color: #e5534b; }
+.card-pop button.danger svg { color: currentColor; }
+.card-pop button.danger:hover, .card-pop button.danger:focus-visible { background: #b3261e; color: #fff; }
+.cls-vol:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
+/* Al pasar el cursor por la barra de la clase: el tiempo que hay ahí y una raya fina. */
+.cls-hover {
+  position: absolute; bottom: calc(100% + 2px); left: 0; transform: translateX(-50%); z-index: 3; pointer-events: none;
+  padding: 3px 8px; border-radius: 6px; background: rgb(0 0 0 / 0.85); color: #fff; font-size: 0.8rem; font-weight: 600;
+  font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+}
+.cls-hoverline { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; z-index: 2; background: #fff; opacity: 0.8; pointer-events: none; }

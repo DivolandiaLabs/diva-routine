@@ -44,6 +44,7 @@ const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 const PENCIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11a2.1 2.1 0 0 0-3-3L5 16z"/></svg>';
 const FOLDER = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>';
 const ICON = {
+  sync: svg('<path d="M20 12a8 8 0 0 1-14 5.3"/><path d="M4 12a8 8 0 0 1 14-5.3"/><path d="M18 3v4h-4"/><path d="M6 21v-4h4"/>'),
   undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>'),
   import: svg('<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1 1"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1-1"/>'),
   upload: svg('<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>'),
@@ -200,7 +201,7 @@ export function renderLibrary(root, libraryId) {
     requestAnimationFrame(step);
   };
   const jumpToPinned = () => {
-    const tiles = [...root.querySelectorAll('#grid .tile:has(.card-pin.on)')];
+    const tiles = [...root.querySelectorAll('#grid .tile.pinned')];
     if (!tiles.length) return;
     pinCursor = (pinCursor + 1) % tiles.length;
     const tile = tiles[pinCursor];
@@ -302,6 +303,10 @@ export function renderLibrary(root, libraryId) {
     } catch (err) { toast(err.message, 'error'); }
     finally { undoBusy = false; await updateUndo(); }
   };
+  const isLinked = (l) => Boolean(l?.igCollections?.length || l?.lists?.length);
+  const syncTargets = () => (folder
+    ? [folder.id, ...descendantIds(folder.id)].map((id) => libraryById(id)).filter(isLinked)
+    : linkedLibraries());
   const drawMenu = () => {
     const n = selection.length;
     const nVideos = selection.filter((s) => s.type === 'video').length;
@@ -319,6 +324,9 @@ export function renderLibrary(root, libraryId) {
         disabled: !target,
         title: target ? `Compartir «${libraryById(target)?.name}» con otras personas (pueden añadir cosas)` : 'Entra en una carpeta (o selecciona una) para compartirla con otras personas',
       }),
+      syncTargets().length ? item('sync', 'Sincronizar', {
+        title: folder ? 'Traer lo nuevo de las listas enlazadas a esta carpeta (Instagram, YouTube, TikTok)' : 'Traer lo nuevo de todas las carpetas enlazadas a listas (Instagram, YouTube, TikTok)',
+      }) : '',
       '<span class="opt-sep"></span>',
       item('selectAll', 'Todo', { title: 'Seleccionar o quitar todo lo que se ve' }),
       item('move', 'Mover', { badge: n, disabled: !n, title: 'Mover lo seleccionado a otra carpeta' }),
@@ -702,6 +710,92 @@ export function renderLibrary(root, libraryId) {
   };
   const byTag = (r) => (addedByOther(r) ? `<span class="by" title="Lo añadió ${esc(r.addedBy)}">de ${esc(who(r.addedBy))}</span>` : '');
 
+  // Opciones de un recuadro (pin, carátula, borrar): juntas en un menú tras el botón ⋮ de la esquina.
+  const MORE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5.5" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.5" r="1.9"/></svg>';
+  const TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6"/></svg>';
+  const menuButton = () => `<button class="card-menu" data-card-menu title="Opciones" aria-label="Opciones" aria-haspopup="menu" aria-expanded="false">${MORE_ICON}</button>`;
+  // Lo que está puesto se ve siempre (y con un clic se quita, como antes).
+  const cardFlags = (pinAttr, pinned, coverId) => (pinned || coverId
+    ? `<span class="card-flags">${coverId ? `<button class="card-flag" data-cover="${coverId}" title="Quitar de carátula de la clase" aria-label="Quitar de carátula de la clase">${COVER_ICON}</button>` : ''}${pinned ? `<button class="card-flag flag-pin" ${pinAttr} title="Quitar el pin" aria-label="Quitar el pin">${PIN}</button>` : ''}</span>`
+    : '');
+  const coverable = (v) => Boolean(folder && isClass(folder) && v.libraryId === folder.id && !isAudio(v) && v.source.platform !== 'spotify');
+  const isCover = (v) => coverable(v) && libraryById(folder.id)?.cover === v.id; // la carpeta tal como está ahora
+  function menuItems(kind, id) {
+    const item = (attr, icon, text, danger = false) => `<button type="button" role="menuitem" class="${danger ? 'danger' : ''}" ${attr}>${icon}<span>${text}</span></button>`;
+    if (kind === 'library') {
+      const l = libraryById(id);
+      if (!l) return '';
+      const sp = spaceFor('folder', l.id);
+      return (isLinked(l) ? item(`data-sync-lib="${l.id}"`, ICON.sync, 'Sincronizar') : '')
+        + item(`data-pin-lib="${l.id}"`, PIN, l.pinnedTop ? 'Quitar el pin' : 'Fijar arriba')
+        + (lockedIn(l, l.parentId) ? '' : item(`data-del-lib="${l.id}"`, TRASH_ICON, sp && !sp.mine ? 'Salir de esta carpeta compartida' : 'Borrar la carpeta', true));
+    }
+    const v = videoById(id);
+    if (!v) return '';
+    return item(`data-pin-video="${v.id}"`, PIN, v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba')
+      + (coverable(v) ? item(`data-cover="${v.id}"`, COVER_ICON, isCover(v) ? 'Quitar de carátula de la clase' : 'Poner de carátula de la clase') : '')
+      + (lockedIn(v, v.libraryId) ? '' : item(`data-del-video="${v.id}"`, TRASH_ICON, 'Borrar', true));
+  }
+  let cardPop = null; // { el, btn } del menú abierto
+  function closeCardMenu(focus = false) {
+    if (!cardPop) return;
+    const { el, btn } = cardPop;
+    cardPop = null;
+    el.remove();
+    btn.setAttribute('aria-expanded', 'false');
+    btn.closest('.tile')?.classList.remove('menu-open');
+    if (focus && btn.isConnected) btn.focus({ preventScroll: true });
+  }
+  function openCardMenu(btn) {
+    const tile = btn.closest('.tile');
+    const html = tile && menuItems(tile.dataset.kind, tile.dataset.id);
+    if (!html) return;
+    const el = document.createElement('div');
+    el.className = 'card-pop';
+    el.setAttribute('role', 'menu');
+    el.innerHTML = html;
+    root.append(el);
+    btn.setAttribute('aria-expanded', 'true');
+    tile.classList.add('menu-open');
+    cardPop = { el, btn };
+    placeCardMenu();
+    el.querySelector('button')?.focus({ preventScroll: true });
+  }
+  // Bajo el botón, alineado a su derecha; si no cabe abajo, encima. Al hacer scroll lo sigue
+  // (y se cierra si el botón deja de verse o el recuadro se repinta).
+  function placeCardMenu() {
+    if (!cardPop) return;
+    const { el, btn } = cardPop;
+    const r = btn.getBoundingClientRect();
+    if (!btn.isConnected || r.bottom < 0 || r.top > innerHeight) return closeCardMenu();
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    el.style.left = `${Math.max(8, Math.min(r.right - w, innerWidth - w - 8))}px`;
+    el.style.top = `${r.bottom + 6 + h > innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
+  }
+  const onPopOutside = (e) => {
+    if (cardPop && !e.target.closest?.('.card-pop, [data-card-menu]')) closeCardMenu();
+  };
+  const onPopKey = (e) => {
+    if (!cardPop) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      return closeCardMenu(true);
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const items = [...cardPop.el.querySelectorAll('button')];
+      const i = items.indexOf(document.activeElement);
+      e.preventDefault();
+      items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+    }
+  };
+  const onPopScroll = () => placeCardMenu();
+  document.addEventListener('pointerdown', onPopOutside, true);
+  document.addEventListener('keydown', onPopKey, true);
+  window.addEventListener('scroll', onPopScroll, true);
+  window.addEventListener('resize', onPopScroll);
+
   const folderTile = (l) => {
     const vids = videosOf(l.id);
     const subs = childFolders(l.id).length;
@@ -711,16 +805,16 @@ export function renderLibrary(root, libraryId) {
     const sp = spaceFor('folder', l.id);
     const received = sp && !sp.mine;
     return `
-      <article class="tile tile-folder${isClass(l) ? ' tile-class' : ''}" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="false" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
+      <article class="tile tile-folder${isClass(l) ? ' tile-class' : ''}${l.pinnedTop ? ' pinned' : ''}" data-kind="library" data-id="${l.id}" data-drop-lib="${l.id}" draggable="false" title="Arrastra aquí videos para meterlos en «${esc(l.name)}»">
         <label class="sel" title="Seleccionar toda la carpeta para una rutina"><input type="checkbox" data-sel-lib="${l.id}"><b class="order"></b></label>
-        <button class="card-pin${l.pinnedTop ? ' on' : ''}" data-pin-lib="${l.id}" title="${l.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${l.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(l.name)}" aria-pressed="${Boolean(l.pinnedTop)}">${PIN}</button>
-        ${lockedIn(l, l.parentId) ? '' : `<button class="card-del" data-del-lib="${l.id}" title="${received ? 'Salir de esta carpeta compartida' : 'Borrar la carpeta y todo lo que tiene'}" aria-label="${received ? 'Salir de' : 'Borrar'} la carpeta ${esc(l.name)}">✕</button>`}
+        ${cardFlags(`data-pin-lib="${l.id}"`, l.pinnedTop, null)}
+        ${menuButton()}
         <a class="tile-thumb" href="#/biblioteca/${l.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((v) => `<span>${videoThumb(v)}</span>`).join('')}</span>`
           : `<span class="folder-empty">${isClass(l) ? ICON.classIcon : ICON.folder}</span>`}</a>
         <a class="tile-body" href="#/biblioteca/${l.id}">
           <h3>${isClass(l) ? ICON.classIcon : ICON.folder}<span class="name-edit" data-name="library:${l.id}" title="Haz clic para cambiar el nombre">${esc(l.name)}</span></h3>
-          <div class="meta">${subs ? `<span>${subs} carpeta${subs === 1 ? '' : 's'}</span>` : ''}<span>${vids.length} elemento${vids.length === 1 ? '' : 's'}</span>${l.igCollections?.length ? '<i class="ig-tag" title="Sincronizada con Instagram">IG</i>' : ''}${sp && (sp.members.length > 1 || !sp.mine) ? `<i class="share-tag" title="Carpeta colaborativa · ${esc(sharedLabel(sp))}">${SHARE_TAG}${sp.members.length}</i>` : byTag(l)}</div>
+          <div class="meta">${subs ? `<span>${subs} carpeta${subs === 1 ? '' : 's'}</span>` : ''}<span>${vids.length} elemento${vids.length === 1 ? '' : 's'}</span>${l.igCollections?.length ? '<i class="ig-tag" title="Sincronizada con Instagram">IG</i>' : ''}${(l.lists || []).some((x) => !/tiktok/i.test(x.url)) ? '<i class="ig-tag" title="Sincronizada con YouTube">YT</i>' : ''}${(l.lists || []).some((x) => /tiktok/i.test(x.url)) ? '<i class="ig-tag" title="Sincronizada con TikTok">TT</i>' : ''}${sp && (sp.members.length > 1 || !sp.mine) ? `<i class="share-tag" title="Carpeta colaborativa · ${esc(sharedLabel(sp))}">${SHARE_TAG}${sp.members.length}</i>` : byTag(l)}</div>
         </a>
       </article>`;
   };
@@ -817,17 +911,11 @@ export function renderLibrary(root, libraryId) {
 
   // En una clase, una foto o un video se puede poner de carátula de la clase.
   const COVER_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="10" r="1.8" fill="currentColor"/><path d="M5 17.5l4.5-4.5 3 3 2.5-2.5 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
-  const coverBtn = (v) => {
-    if (!folder || !isClass(folder) || v.libraryId !== folder.id || isAudio(v) || v.source.platform === 'spotify') return '';
-    const on = libraryById(folder.id)?.cover === v.id; // la carpeta tal como está ahora
-    return `<button class="card-cover${on ? ' on' : ''}" data-cover="${v.id}" title="${on ? 'Quitar de carátula de la clase' : 'Poner de carátula de la clase'}" aria-label="${on ? 'Quitar de carátula' : 'Poner de carátula'} ${esc(v.title)}" aria-pressed="${on}">${COVER_ICON}</button>`;
-  };
   const videoTile = (v, showFolder) => `
-    <article class="tile tile-${isAudio(v) ? 'audio' : v.source.mediaType === 'image' ? 'image' : 'video'}" data-kind="video" data-id="${v.id}" draggable="false">
+    <article class="tile tile-${isAudio(v) ? 'audio' : v.source.mediaType === 'image' ? 'image' : 'video'}${v.pinnedTop ? ' pinned' : ''}" data-kind="video" data-id="${v.id}" draggable="false">
       <label class="sel" title="Seleccionar para una rutina"><input type="checkbox" data-sel-video="${v.id}"><b class="order"></b></label>
-      <button class="card-pin${v.pinnedTop ? ' on' : ''}" data-pin-video="${v.id}" title="${v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba'}" aria-label="${v.pinnedTop ? 'Quitar el pin de' : 'Fijar arriba'} ${esc(v.title)}" aria-pressed="${Boolean(v.pinnedTop)}">${PIN}</button>
-      ${coverBtn(v)}
-      ${lockedIn(v, v.libraryId) ? '' : `<button class="card-del" data-del-video="${v.id}" title="Borrar" aria-label="Borrar ${esc(v.title)}">✕</button>`}
+      ${cardFlags(`data-pin-video="${v.id}"`, v.pinnedTop, isCover(v) ? v.id : null)}
+      ${menuButton()}
       ${audioFile(v) ? audioPlayer(v) : `<a class="tile-thumb" href="#/video/${v.id}">${videoThumb(v)}</a>`}
       <${audioFile(v) ? 'div' : 'a'} class="tile-body" ${audioFile(v) ? '' : `href="#/video/${v.id}"`}>
         <h3><span class="name-edit" data-name="video:${v.id}" title="Haz clic para cambiar el nombre">${esc(v.title)}</span></h3>
@@ -922,6 +1010,7 @@ export function renderLibrary(root, libraryId) {
       `${vids.length} elemento${vids.length === 1 ? '' : 's'}`,
     ].filter(Boolean).join(' · ');
     const tile = (it) => (it.kind === 'library' ? folderTile(it.x) : it.kind === 'routine' ? routineTile(it.x) : videoTile(it.x, searching));
+    closeCardMenu(); // su recuadro se va a repintar
     $('#grid').innerHTML = (searching ? '' : importTile()) + (items.length
       ? items.map(tile).join('')
       : `<div class="empty-state"><h2>${searching ? 'Nada por aquí' : folder ? 'Carpeta vacía' : 'Tu biblioteca está vacía'}</h2>
@@ -930,7 +1019,7 @@ export function renderLibrary(root, libraryId) {
     drawAudio();
     drawSelection();
     pinCursor = -1;
-    setPinLabel([...$('#grid').querySelectorAll('.tile:has(.card-pin.on)')], 0);
+    setPinLabel([...$('#grid').querySelectorAll('.tile.pinned')], 0);
   };
 
   root.addEventListener('click', (e) => {
@@ -1821,8 +1910,51 @@ export function renderLibrary(root, libraryId) {
     input.addEventListener('click', (ev) => ev.stopPropagation());
   };
 
+  /** Trae lo nuevo de las listas enlazadas a esas carpetas; el botón pulsado dice «Sincronizando…». */
+  let syncing = false;
+  async function syncFolders(libs, el) {
+    libs = libs.filter(isLinked);
+    if (!libs.length || syncing) return;
+    syncing = true;
+    const label = el?.querySelector('span') || el;
+    const before = label?.textContent;
+    if (el) el.disabled = true;
+    if (label) label.textContent = tr('Sincronizando…');
+    try {
+      const { created, errors } = await syncInstagram(libs);
+      if (errors.length) {
+        toast(errors.slice(0, 3).join('\n'), 'error');
+        if (!state.instagram.connected && libs.some((l) => l.igCollections?.length)) openInstagram({ view: 'connect', message: errors[0] });
+      } else {
+        toast(created.length ? `${created.length} publicación(es) nueva(s). Se descargan solas.` : 'Todo al día: no hay publicaciones nuevas.');
+      }
+    } finally {
+      syncing = false;
+      if (el?.isConnected) {
+        el.disabled = false;
+        if (label) label.textContent = before;
+      }
+      drawLinked();
+    }
+  }
+
   root.addEventListener('click', async (e) => {
     const t = e.target;
+    const syncLib = t.closest('[data-sync-lib]');
+    if (syncLib) {
+      e.preventDefault();
+      if (cardPop) closeCardMenu();
+      return syncFolders([libraryById(syncLib.dataset.syncLib)], document.querySelector('[data-menu="sync"]'));
+    }
+    const more = t.closest('[data-card-menu]');
+    if (more) {
+      e.preventDefault();
+      const again = cardPop?.btn === more;
+      closeCardMenu();
+      if (!again) openCardMenu(more);
+      return;
+    }
+    if (cardPop && t.closest('.card-pop')) closeCardMenu();
     const dlOne = t.closest('[data-dl-video]');
     if (dlOne) {
       // Va dentro del enlace del recuadro: descarga sin abrir el video.
@@ -2010,6 +2142,7 @@ export function renderLibrary(root, libraryId) {
       return;
     }
     if (menu === 'undo') return undoLast();
+    if (menu === 'sync') return syncFolders(syncTargets(), t.closest('[data-menu]'));
     if (menu === 'trash') {
       const libs = selection.filter((s) => s.type === 'library').map((s) => libraryById(s.id)).filter(Boolean);
       const videos = selection
@@ -2054,19 +2187,7 @@ export function renderLibrary(root, libraryId) {
       emit('data');
       toast('Instagram desconectado');
     } else if (act === 'ig-sync' || act === 'ig-sync-all') {
-      const label = el.textContent;
-      el.disabled = true;
-      el.textContent = 'Sincronizando…';
-      const { created, errors } = await syncInstagram(act === 'ig-sync' ? [libraryById(folder.id)] : linkedLibraries());
-      el.disabled = false;
-      el.textContent = label;
-      drawLinked();
-      if (errors.length) {
-        toast(errors.slice(0, 3).join('\n'), 'error');
-        if (!state.instagram.connected) openInstagram({ view: 'connect', message: errors[0] });
-      } else {
-        toast(created.length ? `${created.length} publicación(es) nueva(s). Se descargan solas.` : 'Todo al día: no hay publicaciones nuevas.');
-      }
+      await syncFolders(act === 'ig-sync' ? [libraryById(folder.id)] : linkedLibraries(), el);
     } else if (act === 'clear-sel') {
       selection.length = 0;
       emit('selection');
@@ -2181,6 +2302,11 @@ export function renderLibrary(root, libraryId) {
   };
   window.addEventListener('store', onStore);
   return () => {
+    closeCardMenu();
+    document.removeEventListener('pointerdown', onPopOutside, true);
+    document.removeEventListener('keydown', onPopKey, true);
+    window.removeEventListener('scroll', onPopScroll, true);
+    window.removeEventListener('resize', onPopScroll);
     player.pause();
     window.removeEventListener('store', onStore);
     document.removeEventListener('keydown', onKey);
