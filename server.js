@@ -672,7 +672,8 @@ async function spotifyInfo(url) {
     if (r.status === 404 || r.status === 400) return { ok: false, title: null };
     if (!r.ok) return { ok: null, title: null };
     const j = await r.json();
-    return { ok: true, title: j.title ? String(j.title).slice(0, 200) : null, duration: await spotifyDuration(url) };
+    const thumb = /^https:\/\//i.test(String(j.thumbnail_url || '')) ? String(j.thumbnail_url).slice(0, 500) : null; // su carátula
+    return { ok: true, title: j.title ? String(j.title).slice(0, 200) : null, thumb, duration: await spotifyDuration(url) };
   } catch {
     return { ok: null, title: null };
   }
@@ -1956,7 +1957,7 @@ async function handleApi(req, res, parts) {
           continue;
         }
         const sp = detectPlatform(raw) === 'spotify' ? await spotifyInfo(raw) : null;
-        let entries = [{ url: raw, title: sp?.title || null, duration: sp?.duration || null }];
+        let entries = [{ url: raw, title: sp?.title || null, duration: sp?.duration || null, thumb: sp?.thumb || null }];
         if (isPlaylist(raw)) {
           try {
             entries = await expandPlaylist(raw);
@@ -1969,7 +1970,7 @@ async function handleApi(req, res, parts) {
           created.push(
             newVideo(libraryOrRoot(libraryId), {
               title: e.title || titleFromUrl(e.url),
-              source: { kind: 'link', url: e.url, platform: detectPlatform(e.url), file: null, mediaType: null, ...(e.duration ? { duration: e.duration } : {}) },
+              source: { kind: 'link', url: e.url, platform: detectPlatform(e.url), file: null, mediaType: null, ...(e.duration ? { duration: e.duration } : {}), ...(e.thumb ? { thumb: e.thumb } : {}) },
             })
           );
         }

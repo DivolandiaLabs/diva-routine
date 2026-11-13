@@ -585,7 +585,11 @@ export function videoThumb(v) {
   const ph = (label, cover = '') =>
     `<div class="ph ph-${esc(v.source.platform)}"><span>${esc(label)}</span>${cover ? `<img class="ph-cover" src="${esc(cover)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()">` : ''}</div>`;
   if (v.source.mediaType === 'image' && v.source.file) return `<img src="/media/${esc(v.source.file)}" alt="" loading="lazy">`;
-  if (isAudio(v)) return `<div class="ph ph-audio ph-${esc(v.source.platform)}"><span>${v.source.platform === 'spotify' ? 'Spotify' : '♪ Audio'}</span></div>`;
+  if (isAudio(v)) {
+    const sp = v.source.platform === 'spotify';
+    const cover = sp ? spotifyCover(v) : null;
+    return `<div class="ph ph-audio ph-${esc(v.source.platform)}"${sp ? ` data-sp="${esc(v.source.url || '')}"` : ''}><span>${sp ? 'Spotify' : '♪ Audio'}</span>${cover ? coverImg(cover) : ''}</div>`;
+  }
   if (v.poster) return `<img src="/media/${esc(v.poster)}" alt="" loading="lazy">`;
   if (v.source.mediaType === 'video') {
     // Mientras se hace su portada: la del post de Instagram si la hay, o un fondo neutro.
@@ -605,6 +609,45 @@ const posterFailed = new Set();
 let posterBusy = false;
 
 /** Pide (en segundo plano, de una en una) la portada de un video descargado que aún no la tiene. */
+const coverImg = (src) => `<img class="ph-cover" src="${esc(src)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()">`;
+
+/*
+ * Carátulas de Spotify (de la canción, el álbum o la lista). Al importar un link se guarda con él;
+ * las de los importados antes se piden a Spotify (su oEmbed es público y no pide cuenta) y se
+ * apuntan en este dispositivo. Las listas personales o privadas no tienen: quedan en verde.
+ */
+const SP_COVERS = 'jr-sp-covers';
+let spCovers = null;
+const spAsked = new Set();
+const spCoverCache = () => {
+  if (!spCovers) {
+    try { spCovers = JSON.parse(localStorage.getItem(SP_COVERS) || '{}') || {}; } catch { spCovers = {}; }
+  }
+  return spCovers;
+};
+function spotifyCover(v) {
+  const url = v.source.url || '';
+  const known = v.source.thumb || spCoverCache()[url];
+  if (known || !/^https:\/\/open\.spotify\.com\//i.test(url) || spAsked.has(url)) return known || null;
+  spAsked.add(url);
+  askSpotifyCover(url);
+  return null;
+}
+async function askSpotifyCover(url) {
+  try {
+    const r = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`);
+    if (!r.ok) return;
+    const src = String((await r.json()).thumbnail_url || '');
+    if (!/^https:\/\//i.test(src)) return;
+    spCoverCache()[url] = src;
+    try { localStorage.setItem(SP_COVERS, JSON.stringify(spCovers)); } catch { /* solo esta vez */ }
+    // Se pone en todas las tarjetas de esa lista que haya en pantalla (biblioteca, clase, mosaicos…).
+    for (const el of document.querySelectorAll('.ph-spotify[data-sp]')) {
+      if (el.dataset.sp === url && !el.querySelector('.ph-cover')) el.insertAdjacentHTML('beforeend', coverImg(src));
+    }
+  } catch { /* sin conexión: queda en verde */ }
+}
+
 export function requestPoster(id) {
   if (posterFailed.has(id) || posterQueue.includes(id)) return;
   posterQueue.push(id);
