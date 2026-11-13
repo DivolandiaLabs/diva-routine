@@ -1103,7 +1103,8 @@ const VIDEO_EDITABLE = ['title', 'titleLocked', 'libraryId', 'notes', 'poster', 
 // titleLocked/categoryLocked: editados a mano, el análisis ya no los sustituye.
 const EXERCISE_EDITABLE = ['folderId', 'tabs', 'pinnedTop', 'srcLabel', 'title', 'titleLocked', 'start', 'end', 'mode', 'keyframes', 'technique', 'category', 'categoryLocked', 'notes', 'aiPrompt'];
 // pinned / pinnedIn: la rutina se ve arriba en esas bibliotecas (pinned, de antes: en la principal).
-const ROUTINE_EDITABLE = ['name', 'subtitle', 'items', 'notes', 'pinned', 'pinnedIn', 'tabs', 'pinnedTop', 'tableStyle'];
+// topIn: en qué carpetas o bibliotecas está fijada arriba (el pin de su recuadro en la Biblioteca).
+const ROUTINE_EDITABLE = ['name', 'subtitle', 'items', 'notes', 'pinned', 'pinnedIn', 'tabs', 'pinnedTop', 'tableStyle', 'topIn'];
 
 const rootLibrary = () => db.libraries.find((l) => l.root) || db.libraries[0];
 

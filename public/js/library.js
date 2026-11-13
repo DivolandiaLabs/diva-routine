@@ -712,6 +712,11 @@ export function renderLibrary(root, libraryId) {
 
   // Opciones de un recuadro (pin, carátula, borrar): juntas en un menú tras el botón ⋮ de la esquina.
   const MORE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5.5" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.5" r="1.9"/></svg>';
+  // Tijeras: cortar el video en tramos (secuencias).
+  const SEQ_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M8.6 7.6 20 18M8.6 16.4 20 6"/></svg>';
+  const UNPIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  // Rutina fijada arriba aquí (cada carpeta o clase lo suyo).
+  const rtTop = (r) => Boolean(r.topIn?.includes(place()));
   const TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6"/></svg>';
   const menuButton = () => `<button class="card-menu" data-card-menu title="Opciones" aria-label="Opciones" aria-haspopup="menu" aria-expanded="false">${MORE_ICON}</button>`;
   // Lo que está puesto se ve siempre (y con un clic se quita, como antes).
@@ -722,6 +727,12 @@ export function renderLibrary(root, libraryId) {
   const isCover = (v) => coverable(v) && libraryById(folder.id)?.cover === v.id; // la carpeta tal como está ahora
   function menuItems(kind, id) {
     const item = (attr, icon, text, danger = false) => `<button type="button" role="menuitem" class="${danger ? 'danger' : ''}" ${attr}>${icon}<span>${text}</span></button>`;
+    if (kind === 'routine') {
+      const r = state.routines.find((x) => x.id === id);
+      if (!r) return '';
+      return item(`data-pin-rt-here="${r.id}"`, PIN, rtTop(r) ? 'Quitar el pin' : 'Fijar arriba')
+        + item(`data-unpin="${r.id}"`, UNPIN_ICON, isClass(folder) ? 'Quitar de la clase (la rutina no se borra)' : folder ? 'Quitar de esta carpeta (la rutina no se borra)' : 'Quitar de la página principal (la rutina no se borra)', true);
+    }
     if (kind === 'library') {
       const l = libraryById(id);
       if (!l) return '';
@@ -732,7 +743,10 @@ export function renderLibrary(root, libraryId) {
     }
     const v = videoById(id);
     if (!v) return '';
-    return item(`data-pin-video="${v.id}"`, PIN, v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba')
+    // Los videos (no fotos ni audio) se abren en el creador de secuencias: tramos y ejercicios.
+    const seq = !isAudio(v) && v.source.mediaType !== 'image';
+    return (seq ? item(`data-seq-video="${v.id}"`, SEQ_ICON, 'Crear secuencias') : '')
+      + item(`data-pin-video="${v.id}"`, PIN, v.pinnedTop ? 'Quitar el pin' : 'Fijar arriba')
       + (coverable(v) ? item(`data-cover="${v.id}"`, COVER_ICON, isCover(v) ? 'Quitar de carátula de la clase' : 'Poner de carátula de la clase') : '')
       + (lockedIn(v, v.libraryId) ? '' : item(`data-del-video="${v.id}"`, TRASH_ICON, 'Borrar', true));
   }
@@ -928,8 +942,9 @@ export function renderLibrary(root, libraryId) {
     const exs = r.items.map((it) => itemExercise(it)).filter(Boolean);
     const shown = exs.slice(0, 4);
     return `
-      <article class="tile tile-routine" data-kind="routine" data-id="${r.id}">
-        <button class="card-del" data-unpin="${r.id}" title="${isClass(folder) ? 'Quitar de la clase (la rutina no se borra)' : folder ? 'Quitar de esta carpeta (la rutina no se borra)' : 'Quitar de la página principal (la rutina no se borra)'}" aria-label="Quitar ${esc(r.name)} de la página principal">✕</button>
+      <article class="tile tile-routine${rtTop(r) ? ' pinned' : ''}" data-kind="routine" data-id="${r.id}">
+        ${cardFlags(`data-pin-rt-here="${r.id}"`, rtTop(r), null)}
+        ${menuButton()}
         <a class="tile-thumb" href="#/rutina/${r.id}">${shown.length
           ? `<span class="mosaic m${shown.length}">${shown.map((e) => `<span>${exerciseFigure(e, 120)}</span>`).join('')}</span>`
           : '<span class="folder-empty">Vacía</span>'}</a>
@@ -1940,6 +1955,27 @@ export function renderLibrary(root, libraryId) {
 
   root.addEventListener('click', async (e) => {
     const t = e.target;
+    const pinRt = t.closest('[data-pin-rt-here]');
+    if (pinRt) {
+      e.preventDefault();
+      const r = state.routines.find((x) => x.id === pinRt.dataset.pinRtHere);
+      if (!r) return;
+      const here = place();
+      const topIn = rtTop(r) ? r.topIn.filter((x) => x !== here) : [...new Set([...(r.topIn || []), here])];
+      try {
+        upsert('routines', await api.updateRoutine(r.id, { topIn }));
+        emit('data');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+      return;
+    }
+    const seqVideo = t.closest('[data-seq-video]');
+    if (seqVideo) {
+      e.preventDefault();
+      location.hash = `#/video/${seqVideo.dataset.seqVideo}`;
+      return;
+    }
     const syncLib = t.closest('[data-sync-lib]');
     if (syncLib) {
       e.preventDefault();
