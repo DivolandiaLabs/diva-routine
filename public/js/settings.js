@@ -31,6 +31,7 @@ const KEYS = [
   ['Clase', [
     ['Espacio', 'Reproduce o pausa.'],
     ['← →', 'Elemento anterior o siguiente.'],
+    ['T', 'Cambia la barra de tiempo: solo este elemento (con su tramo en rojo) o toda la clase.'],
   ]],
   ['Textos que se editan encima', [
     ['Intro', 'Guarda.'],

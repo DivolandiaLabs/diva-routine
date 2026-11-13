@@ -21,7 +21,7 @@ export function renderClassPlay(root, id) {
       <div class="cls-screen" id="clsScreen">
       <div class="cls-stage" id="clsStage"></div>
       <div class="cls-overlay">
-      <div class="cls-seek" id="clsSeek" title="Haz clic (o arrastra) para ir a ese momento"><div class="cls-bar"><div id="clsProgress"></div><span class="cls-loopmark" id="clsLoopMark" hidden></span></div></div>
+      <div class="cls-seek" id="clsSeek" title="Haz clic (o arrastra) para ir a ese momento"><div class="cls-bar"><span class="cls-segmark" id="clsSeg" hidden></span><div id="clsProgress"></div><span class="cls-loopmark" id="clsLoopMark" hidden></span><span class="cls-ticks" id="clsTicks"></span></div></div>
       <div class="cls-controls">
         <button class="btn" data-cls="prev" title="Elemento anterior (←)">⏮</button>
         <button class="btn" data-cls="back" title="10 s atrás (Mayús + ←)">⟲10</button>
@@ -36,6 +36,7 @@ export function renderClassPlay(root, id) {
         <span class="cls-label" id="clsLabel"></span>
         <select class="cls-speed" id="clsSpeed" title="Velocidad"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
         <label class="cls-vol" title="Volumen">🔊<input type="range" id="clsVol" min="0" max="1" step="0.05" value="1"></label>
+        <button class="btn cls-barmode" data-cls="barmode" id="clsBarMode"></button>
         <button class="btn" data-cls="mirror" id="clsMirror" title="Espejo: ver el vídeo invertido, como en el espejo de clase (M)">⇆</button>
         <button class="btn" data-cls="full" title="Pantalla completa (F)">⛶</button>
       </div>
@@ -64,6 +65,9 @@ export function renderClassPlay(root, id) {
   let volume = 1;
   let mirror = false; // imagen invertida, como un espejo (se recuerda)
   try { mirror = localStorage.getItem('jr-mirror') === '1'; } catch { /* sin almacenamiento */ }
+  // Barra: 'item' (el elemento que suena entero, con su tramo en rojo) o 'all' (toda la clase).
+  let barMode = 'item';
+  try { barMode = localStorage.getItem('jr-cls-bar') === 'all' ? 'all' : 'item'; } catch { /* sin almacenamiento */ }
   let rate = 1; // velocidad: videos, audios, y el tiempo de fotos y rutinas
   // Bucle: repite el elemento que suena (o, en videos y audios, solo de A a B).
   let loop = false;
@@ -76,6 +80,48 @@ export function renderClassPlay(root, id) {
   const before = (i) => secs.slice(0, i).reduce((a, b) => a + b, 0);
   const elapsedHere = () => (video && segment ? Math.max(0, video.currentTime - segment.start) : spent + (playing && shownAt ? ((Date.now() - shownAt) / 1000) * rate : 0));
 
+  const timedNow = () => Boolean(video && segment);
+  // Tramo del elemento que suena: en videos y audios, segundos del archivo; en fotos y rutinas, de 0 a su tiempo.
+  const segStart = () => (timedNow() ? segment.start : 0);
+  const segEnd = () => {
+    if (!timedNow()) return secs[index] || 0;
+    if (Number.isFinite(segment.end)) return segment.end;
+    return Number.isFinite(video.duration) ? video.duration : segment.start;
+  };
+  // Lo que ocupa la barra en modo elemento: el archivo entero (así se ve dónde cae el tramo).
+  const itemLen = () => {
+    if (!timedNow()) return secs[index] || 0;
+    const d = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : segment.dur;
+    return Number.isFinite(d) && d > 0 ? Math.max(d, segEnd()) : segEnd();
+  };
+  const curItem = () => (timedNow() ? video.currentTime : elapsedHere());
+  /** Dónde cae en la barra (en %) un instante del elemento que suena. */
+  const pct = (t) => {
+    if (barMode === 'all') return total ? ((before(index) + Math.max(0, t - segStart())) / total) * 100 : 0;
+    const len = itemLen();
+    return len ? Math.max(0, Math.min(100, (t / len) * 100)) : 0;
+  };
+  const BAR_ICON = {
+    item: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h18" opacity=".35"/><path d="M8 12h8" stroke-width="4"/></svg>',
+    all: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M3 12h4M10 12h4M17 12h4"/></svg>',
+  };
+  const drawBarMode = () => {
+    const b = $('#clsBarMode');
+    b.innerHTML = BAR_ICON[barMode];
+    b.classList.toggle('on', barMode === 'all');
+    b.title = barMode === 'item'
+      ? 'La barra muestra este elemento, con su tramo en rojo. Pulsa para ver toda la clase (T)'
+      : 'La barra muestra toda la clase. Pulsa para ver solo este elemento, con su tramo en rojo (T)';
+    const ticks = $('#clsTicks');
+    ticks.hidden = barMode !== 'all';
+    ticks.innerHTML = barMode === 'all' && total ? items.slice(1).map((_, i) => `<i style="left:${(before(i + 1) / total) * 100}%"></i>`).join('') : '';
+  };
+  function setBarMode(mode) {
+    barMode = mode;
+    try { localStorage.setItem('jr-cls-bar', mode); } catch { /* solo esta vez */ }
+    drawBarMode();
+    drawLoop();
+  }
   const loopStart = () => (loopA ?? segment?.start ?? 0);
   const loopEnd = () => (loopB ?? segment?.end ?? Infinity);
   const drawLoop = () => {
@@ -87,7 +133,7 @@ export function renderClassPlay(root, id) {
     const mark = $('#clsLoopMark');
     const end = Math.min(loopEnd(), segment && Number.isFinite(segment.end) ? segment.end : video?.duration || Infinity);
     if (!loop || !timed || !total || !Number.isFinite(end)) return ((mark.hidden = true), (loopSpan = null), tick());
-    const at = (t) => ((before(index) + Math.max(0, t - segment.start)) / total) * 100;
+    const at = pct;
     mark.hidden = false;
     loopSpan = [at(loopStart()), Math.max(at(loopStart()) + 0.5, at(end))];
     mark.style.left = `${loopSpan[0]}%`;
@@ -134,10 +180,22 @@ export function renderClassPlay(root, id) {
     $('#clsNow').textContent = clock(now);
     // Con bucle, la barra solo marca lo que va del trozo que se repite: lo de antes y lo de
     // después quedan en gris, porque no se va a reproducir.
-    const pct = total ? (now / total) * 100 : 0;
+    const seg = $('#clsSeg');
+    seg.hidden = barMode !== 'item' || finished;
+    if (!seg.hidden) {
+      seg.style.left = `${pct(segStart())}%`;
+      seg.style.width = `${Math.max(0, pct(segEnd()) - pct(segStart()))}%`;
+    }
+    let a = 0;
+    let b = 100;
+    if (!finished) {
+      a = barMode === 'all' ? 0 : pct(segStart());
+      b = barMode === 'all' ? (total ? (now / total) * 100 : 0) : pct(Math.min(curItem(), segEnd()));
+    }
+    if (loopSpan) (a = loopSpan[0]), (b = Math.min(b, loopSpan[1]));
     const bar = $('#clsProgress');
-    bar.style.marginLeft = loopSpan ? `${loopSpan[0]}%` : '0';
-    bar.style.width = loopSpan ? `${Math.max(0, Math.min(pct, loopSpan[1]) - loopSpan[0])}%` : `${pct}%`;
+    bar.style.marginLeft = `${a}%`;
+    bar.style.width = `${Math.max(0, b - a)}%`;
   };
   const clearItem = () => {
     clearTimeout(timer);
@@ -262,6 +320,18 @@ export function renderClassPlay(root, id) {
     }
     tick();
   }
+  function seekItem(t) {
+    if (finished) return seekTo(before(index));
+    const off = Math.max(0, Math.min(t, segEnd() - 0.1) - segStart());
+    if (timedNow()) video.currentTime = segStart() + off;
+    else {
+      spent = Math.min(Math.max(0, secs[index] - 0.1), off);
+      clearTimeout(timer);
+      shownAt = 0;
+      if (playing) runTimer();
+    }
+    tick();
+  }
   function setRate(r) {
     spent = elapsedHere();
     rate = r;
@@ -286,7 +356,6 @@ export function renderClassPlay(root, id) {
       finished = true;
       $('#clsToggle').textContent = '▶';
       $('#clsNow').textContent = clock(total);
-      $('#clsProgress').style.width = '100%';
       return toast('Clase terminada');
     }
     show(index + 1);
@@ -409,6 +478,7 @@ export function renderClassPlay(root, id) {
     else if (act === 'fwd') seek(10);
     else if (act === 'full') fullscreen();
     else if (act === 'mirror') setMirror(!mirror);
+    else if (act === 'barmode') setBarMode(barMode === 'item' ? 'all' : 'item');
     else if (act === 'loop') setLoop(!loop);
     else if (act === 'loopA') markLoop('A');
     else if (act === 'loopB') markLoop('B');
@@ -420,9 +490,16 @@ export function renderClassPlay(root, id) {
   });
   // Barra de progreso: clic (o arrastrar) para ir a ese momento de la clase.
   const seekBar = $('#clsSeek');
-  const barTime = (e) => {
+  const barFrac = (e) => {
     const r = seekBar.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * total;
+    return r.width ? Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) : null;
+  };
+  // Toda la clase: va al elemento que toque. Este elemento: se mueve dentro de su tramo.
+  const barSeek = (e, jump = true) => {
+    const f = barFrac(e);
+    if (f === null) return;
+    if (barMode === 'all') seekTo(f * total, jump);
+    else seekItem(f * itemLen());
   };
   let scrubbing = false;
   seekBar.addEventListener('pointerdown', (e) => {
@@ -430,14 +507,14 @@ export function renderClassPlay(root, id) {
     e.preventDefault();
     scrubbing = true;
     seekBar.setPointerCapture?.(e.pointerId);
-    seekTo(barTime(e));
+    barSeek(e);
   });
   // Mientras se arrastra, solo se mueve dentro del elemento que suena; al soltar, va donde sea.
-  seekBar.addEventListener('pointermove', (e) => scrubbing && seekTo(barTime(e), false));
+  seekBar.addEventListener('pointermove', (e) => scrubbing && barSeek(e, false));
   const endScrub = (e) => {
     if (!scrubbing) return;
     scrubbing = false;
-    seekTo(barTime(e));
+    barSeek(e);
   };
   seekBar.addEventListener('pointerup', endScrub);
   seekBar.addEventListener('pointercancel', () => (scrubbing = false));
@@ -448,6 +525,7 @@ export function renderClassPlay(root, id) {
     else if (e.key === 'ArrowLeft') e.shiftKey ? seek(-10) : show(index - 1);
     else if (e.key === 'f' || e.key === 'F') fullscreen();
     else if (e.key === 'm' || e.key === 'M') setMirror(!mirror);
+    else if (e.key === 't' || e.key === 'T') setBarMode(barMode === 'item' ? 'all' : 'item');
     else if (e.key === 'l' || e.key === 'L') setLoop(!loop);
     else if (e.key === 'a' || e.key === 'A') markLoop('A');
     else if (e.key === 'b' || e.key === 'B') markLoop('B');
@@ -476,6 +554,7 @@ export function renderClassPlay(root, id) {
     if (gone) return;
     $('#clsTotal').textContent = clock(total);
     setMirror(mirror);
+    drawBarMode();
     show(0); // con las duraciones ya sabidas
   });
 

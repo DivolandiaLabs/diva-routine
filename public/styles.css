@@ -1654,3 +1654,9 @@ html.locked body > :not(.lock-screen):not(script) { visibility: hidden; }
 .lock-form input { font-size: 1.05rem; }
 .lock-ask { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 18px; }
 .lock-ask::backdrop { background: rgba(0, 0, 0, .45); }
+/* Barra de la clase: el elemento que suena entero, con el tramo que se reproduce en rojo; o toda la clase */
+.cls-segmark { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: .38; pointer-events: none; }
+.cls-ticks { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.cls-ticks i { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #000a; }
+.cls-barmode svg { width: 20px; height: 20px; display: block; }
+.cls-barmode.on { background: var(--accent); border-color: var(--accent); color: #fff; }
