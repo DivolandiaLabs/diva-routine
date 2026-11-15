@@ -282,7 +282,7 @@ input:focus, textarea:focus, select:focus, .btn:focus-visible, .tl:focus-visible
 
 /* ---------- Instagram ---------- */
 .ig-tag { font-style: normal; font-size: 0.66rem; font-weight: 700; padding: 1px 4px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; }
-.ig-linked { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -4px 0 12px; font-size: 0.88rem; color: var(--muted); }
+.ig-linked { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 14px; font-size: 0.88rem; color: var(--muted); }
 .ig-linked b { color: var(--text); font-weight: 600; }
 .ig-dialog {
   width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
@@ -1696,3 +1696,7 @@ html.locked body > :not(.lock-screen):not(script) { visibility: hidden; }
   font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
 }
 .cls-hoverline { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; z-index: 2; background: #fff; opacity: 0.8; pointer-events: none; }
+/* El botón Sincronizar de la franja de una carpeta enlazada: bien visible, con su icono. */
+.ig-sync-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; line-height: 1.2; font-weight: 700; flex: none; }
+.ig-sync-btn svg { width: 16px; height: 16px; }
+.ig-link-dlg select { width: 100%; }

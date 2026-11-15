@@ -737,7 +737,9 @@ export function renderLibrary(root, libraryId) {
       const l = libraryById(id);
       if (!l) return '';
       const sp = spaceFor('folder', l.id);
+      const igLoose = !isLinked(l) && !globalThis.JR_WEB && state.videos.some((v) => v.libraryId === l.id && v.source?.igPk);
       return (isLinked(l) ? item(`data-sync-lib="${l.id}"`, ICON.sync, 'Sincronizar') : '')
+        + (igLoose ? item(`data-ig-link="${l.id}"`, ICON.sync, 'Enlazar con una colección de Instagram') : '')
         + item(`data-pin-lib="${l.id}"`, PIN, l.pinnedTop ? 'Quitar el pin' : 'Fijar arriba')
         + (lockedIn(l, l.parentId) ? '' : item(`data-del-lib="${l.id}"`, TRASH_ICON, sp && !sp.mine ? 'Salir de esta carpeta compartida' : 'Borrar la carpeta', true));
     }
@@ -1097,7 +1099,7 @@ export function renderLibrary(root, libraryId) {
     ].join(', ')}${last ? ` · última vez ${new Date(last).toLocaleString(lang, { dateStyle: 'short', timeStyle: 'short' })}` : ''}</span>
       ${cols.length === 1 && !lists.length && lib.nameLocked && lib.name !== lib.igCollections[0].name
         ? `<button class="btn small ghost" data-ig-name="${esc(lib.igCollections[0].name)}" title="La carpeta volverá a llamarse como la colección (y a cambiar si la renombras en Instagram)">Usar el nombre de Instagram</button>` : ''}
-      <button class="btn small" data-act="ig-sync">Sincronizar</button>`;
+      <button class="btn small primary ig-sync-btn" data-act="ig-sync">${ICON.sync}<span>Sincronizar</span></button>`;
   };
 
   // Carpeta compartida (esta o una de las de encima): con quién, y para gestionarlo.
@@ -1925,6 +1927,48 @@ export function renderLibrary(root, libraryId) {
     input.addEventListener('click', (ev) => ev.stopPropagation());
   };
 
+/** Enlaza la carpeta con una colección de Instagram (lo que ya tiene no se repite) y trae lo nuevo. */
+  async function linkIgCollection(lib) {
+    if (!lib) return;
+    if (!state.instagram.connected) return openInstagram({ view: 'connect' });
+    let collections;
+    try {
+      ({ collections } = await api.igCollections());
+    } catch (err) {
+      return toast(err.message, 'error');
+    }
+    const list = collections.filter((c) => c.id !== 'ALL_MEDIA_AUTO_COLLECTION');
+    const norm = (x) => String(x || '').trim().toLowerCase();
+    const same = list.find((c) => norm(c.name) === norm(lib.name));
+    const dlg = document.createElement('dialog');
+    dlg.className = 'ask ig-link-dlg';
+    dlg.innerHTML = `<form method="dialog">
+      <p><b>${esc(tr('Enlazar con una colección de Instagram'))}</b></p>
+      <p class="hint">${esc(tr('Al sincronizar se añadirán solas las publicaciones nuevas que guardes en esa colección. Las que ya están en la carpeta no se repiten.'))}</p>
+      <label class="field"><select id="igLinkSel">${list.map((c) => `<option value="${esc(c.id)}" ${c === same ? 'selected' : ''}>${esc(c.name)} (${c.count})${c.libraries?.length ? ' ·  ' + esc(tr('ya enlazada')) : ''}</option>`).join('')}</select></label>
+      <footer><button class="btn ghost" value="no" type="submit">${esc(tr('Cancelar'))}</button><button class="btn primary" value="yes" type="submit">${esc(tr('Enlazar'))}</button></footer>
+    </form>`;
+    document.body.append(dlg);
+    dlg.showModal();
+    const ok = await new Promise((resolve) => {
+      dlg.querySelector('form').addEventListener('submit', (ev) => resolve(ev.submitter?.value === 'yes'));
+      dlg.addEventListener('cancel', () => resolve(false));
+    });
+    const col = list.find((c) => c.id === dlg.querySelector('#igLinkSel').value);
+    dlg.remove();
+    if (!ok || !col) return;
+    try {
+      const r = await api.igImport({ id: col.id, name: col.name }, lib.id);
+      upsert('libraries', r.library);
+      r.created.forEach((v) => upsert('videos', v));
+      emit('data');
+      queueDownload(r.created.filter(canDownload).map((v) => v.id));
+      toast(r.created.length ? `Enlazada con «${col.name}»: ${r.created.length} publicación(es) nueva(s). Se descargan solas.` : `Enlazada con «${col.name}». Todo al día.`);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
   /** Trae lo nuevo de las listas enlazadas a esas carpetas; el botón pulsado dice «Sincronizando…». */
   let syncing = false;
   async function syncFolders(libs, el) {
@@ -1969,6 +2013,11 @@ export function renderLibrary(root, libraryId) {
         toast(err.message, 'error');
       }
       return;
+    }
+    const igLink = t.closest('[data-ig-link]');
+    if (igLink) {
+      e.preventDefault();
+      return linkIgCollection(libraryById(igLink.dataset.igLink));
     }
     const seqVideo = t.closest('[data-seq-video]');
     if (seqVideo) {

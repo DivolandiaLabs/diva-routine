@@ -1021,8 +1021,11 @@ async function importIgCollection(lib0, col) {
   let link = lib.igCollections.find((c) => c.id === col.id);
   if (!link) lib.igCollections.push((link = { id: col.id, name: col.name, seen: [] }));
   const seen = new Set(link.seen);
+  // Lo que ya está en la carpeta (de antes, o de cuando se perdió el enlace) cuenta como visto.
+  const have = new Set(db.videos.filter((v) => v.libraryId === lib.id && v.source?.igPk).map((v) => `${v.source.igPk}:${v.source.igIndex ?? ''}`));
   const created = [];
   for (const e of entries) {
+    if (have.has(`${e.igPk}:${e.igIndex ?? ''}`)) seen.add(e.key);
     if (seen.has(e.key)) continue;
     seen.add(e.key);
     created.push(newVideo(lib.id, {
