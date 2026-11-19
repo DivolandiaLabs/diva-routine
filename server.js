@@ -212,6 +212,8 @@ function rememberSaved(data) {
 }
 rememberSaved(db);
 
+/** Fecha de un cambio: ahora, o justo después de la que tenía si esa era «del futuro» (otro reloj adelantado). */
+const laterThan = (prev, t) => (prev && prev >= t ? new Date(Date.parse(prev) + 1).toISOString() : t);
 function stampChanges() {
   const t = now();
   const present = new Set();
@@ -219,7 +221,7 @@ function stampChanges() {
     for (const r of db[c]) {
       present.add(r.id);
       if (savedSnap.get(r.id) !== recordKey(r)) {
-        r.updatedAt = t;
+        r.updatedAt = laterThan(r.updatedAt, t);
         savedSnap.set(r.id, recordKey(r));
         delete db.deleted[r.id]; // si vuelve a existir, ya no está borrado
       }

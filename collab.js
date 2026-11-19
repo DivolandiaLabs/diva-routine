@@ -264,6 +264,8 @@ export function createCollab({ localDir, uploadDir, getDb, saveDb, markSaved, on
     }
     const localH = hash(strip(kind, local, sp));
     if (localH === h) return false;
+    // Allí sigue igual que la última vez: lo distinto es un cambio de aquí, que se sube luego.
+    if (kn && kn.h === h) return false;
     // Cambiado aquí (aún sin subir) después que lo de fuera: se queda, y se sube luego.
     if ((!kn || localH !== kn.h) && (local.updatedAt || '') > remoteAt) return false;
     // Si lo de aquí tenía fecha más nueva (solo cambió algo propio, como «en inicio»), la nueva
