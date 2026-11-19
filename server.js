@@ -922,10 +922,43 @@ function run(cmd, args) {
   });
 }
 
+// yt-dlp propio de la app: si el ordenador no lo tiene instalado, la app se baja la versión
+// oficial (un solo archivo) a su carpeta local la primera vez que hace falta. Así descarga
+// en cualquier ordenador sin instalar nada a mano.
+const YTDLP_ASSET = { win32: 'yt-dlp.exe', darwin: 'yt-dlp_macos', linux: 'yt-dlp_linux' }[process.platform];
+const OWN_YTDLP = YTDLP_ASSET ? path.join(LOCAL_DIR, 'tools', YTDLP_ASSET) : null;
 let ytdlpCmd; // cache: [cmd, prefixArgs] o null
+let ytdlpFetch = null; // la bajada en curso (todas las descargas esperan a la misma)
+/** Hay yt-dlp, o la app puede bajárselo cuando haga falta. */
+const ytdlpAvailable = async () => Boolean(await findYtDlp()) || Boolean(OWN_YTDLP);
+async function fetchOwnYtDlp() {
+  const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${YTDLP_ASSET}`;
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 1_000_000) throw new Error('archivo incompleto');
+  await fsp.mkdir(path.dirname(OWN_YTDLP), { recursive: true });
+  const part = OWN_YTDLP + '.part';
+  await fsp.writeFile(part, buf);
+  if (process.platform !== 'win32') await fsp.chmod(part, 0o755);
+  await fsp.rename(part, OWN_YTDLP);
+  console.log('yt-dlp descargado en', OWN_YTDLP);
+}
+/** El yt-dlp propio está desfasado si tiene más de una semana: YouTube cambia a menudo. */
+let ytdlpRefresh = null; // una vez por arranque; las descargas esperan a que acabe
+const refreshOwnYtDlp = () => (ytdlpRefresh ||= refreshNow());
+async function refreshNow() {
+  try {
+    const st = await fsp.stat(OWN_YTDLP);
+    if (Date.now() - st.mtimeMs < 7 * 864e5) return;
+    const r = await run(OWN_YTDLP, ['-U']);
+    if (r.code === 0) await fsp.utimes(OWN_YTDLP, new Date(), new Date()).catch(() => {});
+  } catch { /* sin conexión: se usa el que hay */ }
+}
 async function findYtDlp() {
   if (ytdlpCmd !== undefined) return ytdlpCmd;
   const candidates = [
+    ...(OWN_YTDLP && fs.existsSync(OWN_YTDLP) ? [[OWN_YTDLP, []]] : []),
     ['yt-dlp', []],
     ['python', ['-m', 'yt_dlp']],
     ['py', ['-m', 'yt_dlp']],
@@ -941,8 +974,20 @@ async function findYtDlp() {
 const extraArgs = () => (process.env.YTDLP_ARGS ? process.env.YTDLP_ARGS.split(' ').filter(Boolean) : []);
 
 async function ytdlp() {
-  const tool = await findYtDlp();
-  if (!tool) throw fail(501, 'Para descargar de YouTube o Instagram hace falta yt-dlp: instálalo con "pip install yt-dlp" y reinicia el servidor. Mientras, puedes subir el archivo.');
+  let tool = await findYtDlp();
+  if (!tool && OWN_YTDLP) {
+    // Primera vez en este ordenador: se baja yt-dlp (una sola vez, aunque haya varias descargas en cola).
+    ytdlpFetch ||= fetchOwnYtDlp().finally(() => (ytdlpFetch = null));
+    try {
+      await ytdlpFetch;
+    } catch (e) {
+      console.warn('No se pudo bajar yt-dlp:', e.message);
+    }
+    ytdlpCmd = undefined;
+    tool = await findYtDlp();
+  }
+  if (!tool) throw fail(501, 'No se pudo preparar el descargador de YouTube e Instagram (yt-dlp). Comprueba la conexión a internet y vuelve a intentarlo. Mientras, puedes subir el archivo.');
+  if (tool[0] === OWN_YTDLP) await refreshOwnYtDlp();
   return tool;
 }
 
@@ -997,7 +1042,7 @@ async function downloadSource(source) {
     try {
       return { ...(await ig.download(source, UPLOAD_DIR, newId())), title: null };
     } catch (e) {
-      if (e.session || !(await findYtDlp())) throw e;
+      if (e.session || !(await ytdlpAvailable())) throw e;
       const got = await ig.withCookieFile((args) => downloadWithYtDlp(source.url, args));
       return { ...got, mediaType: 'video', title: null };
     }
@@ -1454,7 +1499,7 @@ async function handleApi(req, res, parts) {
       videos: db.videos.map(forClient),
       collab: collab.info(),
       update: updateInfo(),
-      ytdlp: Boolean(await findYtDlp()),
+      ytdlp: await ytdlpAvailable(),
       instagram: ig.status(),
       social: social.status(),
       ai: ai.status(),

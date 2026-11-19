@@ -1448,7 +1448,6 @@ dialog.cls-dlg h3 { padding-right: 36px; }
 .cls-overlay .cls-label { color: #fff; }
 .cls-overlay .btn:not(.primary) { background: #ffffff1f; border-color: #ffffff33; color: #fff; }
 .cls-overlay .cls-speed { width: auto; flex: none; background: #ffffff1f; border-color: #ffffff33; color: #fff; }
-.cls-overlay .cls-speed option { color: #000; }
 .cls-vol { display: flex; align-items: center; gap: 6px; color: #fff; }
 .cls-vol input { width: 90px; accent-color: var(--accent); }
 .cls-bar { background: #ffffff33; }
@@ -1700,3 +1699,19 @@ html.locked body > :not(.lock-screen):not(script) { visibility: hidden; }
 .ig-sync-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; line-height: 1.2; font-weight: 700; flex: none; }
 .ig-sync-btn svg { width: 16px; height: 16px; }
 .ig-link-dlg select { width: 100%; }
+/* Velocidad de la clase: botón con la velocidad y, encima, el panel para afinarla. */
+.cls-speedbox { position: relative; flex: none; display: inline-flex; }
+.cls-speed { min-width: 64px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.cls-speedpop {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 5; width: 250px;
+  display: grid; gap: 10px; padding: 12px; border-radius: 12px; background: rgb(20 20 24 / 0.95); color: #fff; box-shadow: 0 6px 24px rgb(0 0 0 / 0.5);
+}
+.cls-speedpop[hidden] { display: none; }
+.cls-speedhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cls-speedhead b { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.cls-speedhead .btn { width: 36px; padding: 4px 0; font-size: 1.2rem; line-height: 1; }
+.cls-speedpop input[type=range] { width: 100%; accent-color: var(--accent); }
+.cls-speedpresets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.cls-speedpresets .btn { padding: 5px 0; font-size: 0.8rem; justify-content: center; }
+.cls-speedpop .btn { background: #ffffff1f; border-color: #ffffff33; color: #fff; }
+.cls-speedpop .btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }

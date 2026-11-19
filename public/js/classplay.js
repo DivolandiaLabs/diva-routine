@@ -34,7 +34,14 @@ export function renderClassPlay(root, id) {
           <button class="btn" data-cls="loopB" id="clsLoopB" title="Marca aquí dónde ACABA el trozo que se repite: desde ahí vuelve al inicio">⇥</button>
         </span>
         <span class="cls-label" id="clsLabel"></span>
-        <select class="cls-speed" id="clsSpeed" title="Velocidad"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+        <span class="cls-speedbox">
+          <button class="btn cls-speed" id="clsSpeed" type="button" title="Velocidad" aria-haspopup="true" aria-expanded="false">1×</button>
+          <div class="cls-speedpop" id="clsSpeedPop" hidden>
+            <div class="cls-speedhead"><button class="btn" type="button" data-rate-step="-1" title="Más lenta (0,05)">−</button><b id="clsSpeedVal">1×</b><button class="btn" type="button" data-rate-step="1" title="Más rápida (0,05)">+</button></div>
+            <input type="range" id="clsSpeedRange" min="0.25" max="2" step="0.05" value="1" aria-label="Velocidad">
+            <div class="cls-speedpresets">${[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((x) => `<button class="btn" type="button" data-rate="${x}">${x === 1 ? 'Normal' : `${x}×`}</button>`).join('')}</div>
+          </div>
+        </span>
         <label class="cls-vol" title="Volumen">🔊<input type="range" id="clsVol" min="0" max="1" step="0.05" value="1"></label>
         <button class="btn cls-barmode" data-cls="barmode" id="clsBarMode"></button>
         <button class="btn" data-cls="mirror" id="clsMirror" title="Espejo: ver el vídeo invertido, como en el espejo de clase (M)">⇆</button>
@@ -73,7 +80,9 @@ export function renderClassPlay(root, id) {
   const nextBarMode = () => BAR_MODES[(BAR_MODES.indexOf(barMode) + 1) % BAR_MODES.length];
   let rate = 1; // velocidad: videos, audios, y el tiempo de fotos y rutinas
   // Bucle: repite el elemento que suena (o, en videos y audios, solo de A a B).
+  // El 🔁 se recuerda: sigue igual al cambiar de pista y al salir y volver a la clase.
   let loop = false;
+  try { loop = localStorage.getItem('jr-cls-loop') === '1'; } catch { /* sin almacenamiento */ }
   let loopA = null;
   let loopB = null;
   let pendingAt = 0; // dónde empezar el próximo elemento (al saltar a él desde la barra)
@@ -161,6 +170,7 @@ export function renderClassPlay(root, id) {
   };
   function setLoop(on) {
     loop = on;
+    try { localStorage.setItem('jr-cls-loop', on ? '1' : '0'); } catch { /* solo esta vez */ }
     if (!on) loopA = loopB = null;
     drawLoop();
     if (!on) $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(items[index])}`;
@@ -222,8 +232,7 @@ export function renderClassPlay(root, id) {
     index = Math.max(0, Math.min(items.length - 1, i));
     spent = 0;
     shownAt = 0;
-    loop = false;
-    loopA = loopB = null;
+    loopA = loopB = null; // el trozo A–B es de cada pista; el 🔁 se queda como esté
     const it = items[index];
     const type = itemType(it);
     $('#clsLabel').textContent = `${index + 1} de ${items.length} · ${nameOf(it)}`;
@@ -572,7 +581,30 @@ export function renderClassPlay(root, id) {
     else if (e.key === 'b' || e.key === 'B') markLoop('B');
   };
   document.addEventListener('keydown', onKey);
-  $('#clsSpeed').addEventListener('change', (e) => setRate(+e.target.value));
+  // Velocidad, como en YouTube: atajos fijos, y un deslizador y − / + para afinar de 0,05 en 0,05.
+  const speedPop = $('#clsSpeedPop');
+  const fmtRate = (r) => `${+r.toFixed(2)}×`;
+  const drawRate = () => {
+    $('#clsSpeed').textContent = fmtRate(rate);
+    $('#clsSpeedVal').textContent = rate === 1 ? 'Normal' : fmtRate(rate);
+    $('#clsSpeedRange').value = String(rate);
+    speedPop.querySelectorAll('[data-rate]').forEach((b) => b.classList.toggle('on', Math.abs(+b.dataset.rate - rate) < 0.001));
+  };
+  const pickRate = (r) => (setRate(Math.round(Math.max(0.25, Math.min(2, r)) * 100) / 100), drawRate());
+  const openSpeed = (open) => {
+    speedPop.hidden = !open;
+    $('#clsSpeed').setAttribute('aria-expanded', String(open));
+  };
+  $('#clsSpeed').addEventListener('click', () => openSpeed(speedPop.hidden));
+  $('#clsSpeedRange').addEventListener('input', (e) => pickRate(+e.target.value));
+  speedPop.addEventListener('click', (e) => {
+    const step = e.target.closest('[data-rate-step]');
+    if (step) return pickRate(rate + 0.05 * +step.dataset.rateStep);
+    const pre = e.target.closest('[data-rate]');
+    if (pre) (pickRate(+pre.dataset.rate), openSpeed(false));
+  });
+  const closeSpeed = (e) => !speedPop.hidden && !e.target.closest?.('.cls-speedbox') && openSpeed(false);
+  document.addEventListener('pointerdown', closeSpeed);
   /** El volumen se puede mover salvo con Spotify en la web, que no lo deja (se usa el del aparato). */
   function drawVol() {
     const ok = !video || 'volume' in video;
@@ -611,6 +643,7 @@ export function renderClassPlay(root, id) {
     clearItem();
     clearInterval(ticker);
     document.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointerdown', closeSpeed);
     document.removeEventListener('pointermove', onPointerMove);
     document.removeEventListener('pointerup', onPointerUp);
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
