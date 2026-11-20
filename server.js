@@ -1015,6 +1015,8 @@ async function downloadWithYtDlp(url, more = []) {
         ? 'Instagram no deja descargar este post ni con tu sesión. Descárgalo desde el móvil y súbelo con «Subir archivo».'
         : 'Instagram pide iniciar sesión para descargar este post: conecta tu cuenta de Instagram (en la Biblioteca) o súbelo con «Subir archivo».');
     }
+    // Web que el descargador no conoce (p. ej. apps de clases de pago): un aviso claro, sin el error técnico.
+    if (/Unsupported URL/i.test(r.err)) throw fail(422, 'Esta web no deja descargar sus videos. Sí se pueden descargar enlaces de YouTube, Instagram, TikTok, Vimeo o Facebook, entre otros. Si tienes el archivo, súbelo con «Subir el archivo».');
     const line = r.err.split('\n').filter((l) => /ERROR/.test(l)).slice(-1).join('');
     throw fail(502, 'No se pudo descargar el video. Puedes subir el archivo a mano.' + (line ? '\n' + line.slice(0, 200) : ''));
   }
