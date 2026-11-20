@@ -135,7 +135,7 @@ export async function openSegment(lib, v) {
   const spotify = v.source?.platform === 'spotify';
   const dlg = dialog(`
     <h3>Tramo de «${esc(v.title)}»</h3>
-    ${spotify ? '<div class="spotify-slot"></div><p class="hint">Pulsa ▶ para que Spotify cargue la canción y poder elegir el tramo.</p>' : `<video src="/media/${esc(encodeURIComponent(v.source.file))}" controls preload="metadata" playsinline></video>`}
+    ${spotify ? '<div class="spotify-slot"></div><p class="hint">Pulsa ▶ para que Spotify cargue la canción y poder elegir el tramo.</p>' : !v.source.file ? `<p class="hint">${esc(tr('El archivo de este video aún no ha llegado a este ordenador: quien lo subió tiene que abrir Diva Routine en su ordenador para que se comparta.'))}</p>` : `<video src="/media/${esc(encodeURIComponent(v.source.file))}" controls preload="metadata" playsinline></video>`}
     <div class="seg-tl" title="Arrastra las asas para elegir el tramo; clic en la barra para ir a ese momento">
       <div class="seg-sel"><span class="seg-h" data-h="start" title="Inicio"></span><span class="seg-h" data-h="end" title="Fin"></span></div>
       <div class="seg-play"></div>

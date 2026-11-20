@@ -575,9 +575,13 @@ const remoteCopy = (v) => Boolean(v.source?.drive || fromAccount(v));
 // En la web, los que están en tu Google Drive no se bajan: se ven desde allí (ver /media/).
 const driveIdOf = (v) => v.source?.drive || (fromAccount(v) && v.source.ref.cloud !== 'mega' ? v.source.ref.id : null);
 const streamable = (v) => Boolean(globalThis.jrWeb && google.connected() && driveIdOf(v));
-const forClient = (v) => (remoteCopy(v) && v.source.file && !streamable(v) && !hasUpload(v.source.file)
-  ? { ...v, source: { ...v.source, file: null } }
-  : v);
+const forClient = (v) => {
+  if (!v.source?.file || hasUpload(v.source.file) || streamable(v)) return v;
+  if (remoteCopy(v)) return { ...v, source: { ...v.source, file: null } };
+  // Subido en otro ordenador y aún sin copia en Drive: hay que esperar a que lo comparta.
+  if (v.source.kind === 'upload') return { ...v, source: { ...v.source, file: null, waiting: true } };
+  return v;
+};
 
 /** Baja el archivo de un video compartido (de Drive, con su enlace) con el mismo nombre. */
 async function fetchShared(v0) {

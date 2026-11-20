@@ -700,6 +700,7 @@ export function renderLibrary(root, libraryId) {
     // Sin archivo: botón para bajar solo este (o volver a intentarlo si falló).
     const dl = canDownload(v) ? `<button class="dl-one" data-dl-video="${v.id}" title="${v.source.fetchError ? 'Volver a intentar la descarga' : 'Descargar solo este'}">${v.source.fetchError ? 'Reintentar' : 'Descargar'}</button>` : '';
     if (v.source.fetchError) return `<span class="badge b-error" title="${esc(v.source.fetchError)}">No se pudo descargar</span>${dl}`;
+    if (v.source.waiting) return `<span class="badge b-link" title="${esc(tr('El archivo de este video aún no ha llegado a este ordenador: quien lo subió tiene que abrir Diva Routine en su ordenador para que se comparta.'))}">${tr('Esperando el archivo')}</span>`;
     return `<span class="badge b-link">Sin descargar</span>${dl}`;
   };
 
