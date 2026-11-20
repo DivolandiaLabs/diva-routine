@@ -260,6 +260,11 @@ export async function finishLogin(code, state) {
   });
   const email = emailOf(t.id_token);
   if (!t.refresh_token) throw gError('Google no dio permiso para seguir sincronizando. Vuelve a intentarlo.');
+  // Sin estos dos (casillas que se pueden desmarcar en la ventana de Google) no se puede sincronizar.
+  const granted = (t.scope || '').split(' ');
+  if (t.scope && !['https://www.googleapis.com/auth/drive.appdata', 'https://www.googleapis.com/auth/drive.file'].every((x) => granted.includes(x))) {
+    throw gError('Google no dio todos los permisos que necesita la app. Vuelve a iniciar sesión y marca todas las casillas de permisos de Google Drive.');
+  }
   tokens = { access_token: t.access_token, refresh_token: t.refresh_token, expires_at: Date.now() + (t.expires_in - 60) * 1000, email, scope: t.scope || '' };
   await saveTokens();
   await loadProfile().catch(() => {});
@@ -353,6 +358,8 @@ async function drive(url, opts = {}, tries = 3) {
     }
     if (!res.ok) {
       const msg = await res.text().catch(() => '');
+      // En la ventana de Google se puede desmarcar algún permiso: sin él, Drive responde 403.
+      if (res.status === 403 && /insufficient.{0,20}scopes|insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(msg)) throw gError('A la app le falta un permiso de Google Drive. Pulsa «Cerrar sesión», vuelve a «Iniciar sesión con Google» y marca todas las casillas de permisos (tus datos no se borran).');
       throw gError(`Google Drive respondió ${res.status}${msg ? ': ' + msg.slice(0, 200) : ''}`);
     }
     return res;
