@@ -11,7 +11,7 @@
     "start": "node server.js",
     "app": "electron .",
     "instalador": "node desktop/preparar.js && electron-builder --win --publish never",
-    "publicar": "node desktop/preparar.js && electron-builder --win --publish always",
+    "publicar": "node desktop/preparar.js && node desktop/publicar.js",
     "web": "node web/build.mjs"
   },
   "engines": {
