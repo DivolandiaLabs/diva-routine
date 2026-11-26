@@ -1680,6 +1680,50 @@ async function handleApi(req, res, parts) {
     const folders = await google.myDriveFolders();
     return send(res, 200, { folders: folders.map((f) => ({ id: f.id, name: f.name, libraries: db.libraries.filter((l) => l.cloudFolders?.some((c) => c.id === f.id)).map((l) => l.id) })) });
   }
+  if (resource === 'cloud' && id === 'gdrive' && action === 'browse' && method === 'GET') {
+    if (!google.status().driveRead) throw fail(400, 'Conecta primero tu Google Drive.');
+    const fid = new URL(req.url, 'http://x').searchParams.get('id') || null;
+    const r = await google.driveBrowse(fid);
+    for (const f of r.folders) f.libraries = db.libraries.filter((l) => l.cloudFolders?.some((c) => (c.cloud || 'gdrive') === 'gdrive' && c.id === f.id)).map((l) => l.id);
+    return send(res, 200, r);
+  }
+  if (resource === 'cloud' && id === 'gdrive' && action === 'pick' && method === 'POST') {
+    // { folders: [{ id, name }], files: [{ id, name }], libraryId }: como en MEGA. Cada carpeta, a una
+    // carpeta de aquí (la suya si ya se importó: entonces solo lo nuevo); los archivos sueltos, a libraryId.
+    if (!google.status().driveRead) throw fail(400, 'Conecta primero tu Google Drive.');
+    const body = await readJson(req);
+    const target = db.libraries.find((l) => l.id === body.libraryId) || rootLibrary();
+    const mkVideo = (lib, f) => newVideo(lib.id, {
+      title: String(f.name).replace(/\.[^.]+$/, '').slice(0, 120),
+      source: { kind: 'link', url: `https://drive.google.com/file/d/${f.id}/view`, platform: 'cloud', cloud: 'gdrive', ref: { cloud: 'gdrive', auth: true, id: f.id, name: f.name }, file: null, mediaType: null },
+    });
+    const created = [];
+    const libs = [];
+    for (const fo of body.folders || []) {
+      const media = await google.driveFolderMedia(String(fo.id));
+      let lib = db.libraries.find((l) => l.cloudFolders?.some((c) => (c.cloud || 'gdrive') === 'gdrive' && c.id === fo.id));
+      if (!lib) {
+        lib = { id: newId(), name: String(fo.name || 'Google Drive').slice(0, 60), parentId: target.root ? null : target.id, createdAt: now() };
+        db.libraries.push(lib);
+      }
+      lib.cloudFolders ||= [];
+      let link = lib.cloudFolders.find((c) => (c.cloud || 'gdrive') === 'gdrive' && c.id === fo.id);
+      if (!link) lib.cloudFolders.push((link = { cloud: 'gdrive', id: String(fo.id), name: String(fo.name || ''), seen: [] }));
+      const seen = new Set(link.seen);
+      for (const f of media) {
+        if (seen.has(f.id)) continue;
+        seen.add(f.id);
+        created.push(mkVideo(lib, f));
+      }
+      link.seen = [...seen];
+      link.syncedAt = now();
+      libs.push(lib);
+    }
+    for (const f0 of body.files || []) created.push(mkVideo(target, await google.driveFileInfo(String(f0.id))));
+    db.videos.push(...created);
+    await saveDb();
+    return send(res, 200, { libraries: libs, created: created.map(forClient) });
+  }
   if (resource === 'cloud' && id === 'gdrive' && action === 'import' && method === 'POST') {
     // { id, name, parentId? }: una carpeta de tu Drive a una carpeta de aquí (la suya si ya la
     // importaste: entonces solo trae lo nuevo).

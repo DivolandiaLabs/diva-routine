@@ -3,6 +3,7 @@
 // Cada opción abre su panel entre la cuadrícula y el menú.
 import { api as baseApi, createApi } from './api.js';
 import { mountMega, openMegaPicker } from './mega.js';
+import { openDrivePicker } from './gdrive.js';
 import { isClass, classItems, itemType, playable, skipped, inPlay, setSkipped, totalSecs, itemSecs, clock, chipText, openSegment, openSecs, rememberDuration } from './classtime.js';
 const historyOwner = (() => {
   try {
@@ -527,6 +528,7 @@ export function renderLibrary(root, libraryId) {
       <div class="row wrap">
         <button class="btn primary" data-act="import">Importar</button>
         <button class="btn" data-act="upload">Subir archivos…</button>
+        <button class="btn" data-act="gdrive" title="Elegir carpetas y archivos de tu Google Drive">${CLOUDS.gdrive.icon} Google Drive…</button>
         <button class="btn" data-act="mega" title="Elegir carpetas y archivos de tu cuenta de MEGA">${CLOUDS.mega.icon} MEGA…</button>
         <button class="btn" data-act="add-routines" title="Poner aquí rutinas que ya has creado">${ICON.routine} Rutinas…</button>
         <button class="btn" data-act="target-new" title="Crear una carpeta dentro de la elegida">+ Carpeta</button>
@@ -2249,6 +2251,10 @@ export function renderLibrary(root, libraryId) {
       $('#targetNew').focus();
     } else if (act === 'target-create') createTarget();
     else if (act === 'upload') $('#files').click();
+    else if (act === 'gdrive') {
+      const lib = libraryById($('#target')?.value || here());
+      openDrivePicker(lib?.id || here(), lib ? libraryLabel(lib) : '');
+    }
     else if (act === 'mega') {
       const lib = libraryById($('#target')?.value || here());
       openMegaPicker(lib?.id || here(), lib ? libraryLabel(lib) : '');

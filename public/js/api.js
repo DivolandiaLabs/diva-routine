@@ -61,6 +61,8 @@ return {
   socialStatus: () => request('GET', '/api/social'),
   cloudImport: (url, libraryId) => request('POST', '/api/cloud/import', { url, libraryId }),
   driveFolders: () => request('GET', '/api/cloud/gdrive/folders'),
+  driveBrowse: (id) => request('GET', `/api/cloud/gdrive/browse${id ? `?id=${encodeURIComponent(id)}` : ''}`),
+  drivePick: (folders, files, libraryId) => request('POST', '/api/cloud/gdrive/pick', { folders, files, libraryId }),
   mega: () => request('GET', '/api/cloud/mega'),
   megaLogin: (email, password, code) => request('POST', '/api/cloud/mega/login', { email, password, code }),
   megaLogout: () => request('POST', '/api/cloud/mega/logout'),

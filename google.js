@@ -154,6 +154,48 @@ export async function driveFolderMedia(folderId) {
   return out;
 }
 
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const SHARE_FOLDER_NAME = 'Diva Routine · compartido';
+const safeId = (id) => {
+  if (!/^[\w-]{1,200}$/.test(String(id))) throw gError('Carpeta de Google Drive no válida.');
+  return String(id);
+};
+async function driveQuery(q) {
+  const out = [];
+  let pageToken = '';
+  do {
+    const res = await drive(`/drive/v3/files?q=${encodeURIComponent(q)}&fields=nextPageToken,files(id,name,mimeType)&orderBy=folder,name&pageSize=1000${pageToken ? `&pageToken=${pageToken}` : ''}&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    const d = await res.json();
+    out.push(...(d.files || []));
+    pageToken = d.nextPageToken || '';
+  } while (pageToken && out.length < 5000);
+  return out;
+}
+/**
+ * Lo que hay en una carpeta de tu Drive (para elegir qué importar): sus carpetas y sus videos y
+ * fotos. Sin id, «Mi unidad»; con id «shared», lo compartido contigo.
+ */
+export async function driveBrowse(folderId) {
+  const wanted = `trashed = false and (mimeType = '${FOLDER_MIME}' or ${VIDEO_MIME})`;
+  let dir;
+  if (!folderId) dir = { id: null, name: 'Mi unidad', parent: null, q: `'root' in parents and ${wanted}` };
+  else if (folderId === 'shared') dir = { id: 'shared', name: 'Compartido conmigo', parent: '', q: `sharedWithMe = true and ${wanted}` };
+  else {
+    const id = safeId(folderId);
+    const meta = await (await drive(`/drive/v3/files/${id}?fields=id,name,parents&supportsAllDrives=true`)).json();
+    const parent = meta.parents?.[0] || '';
+    dir = { id, name: meta.name, parent, q: `'${id}' in parents and ${wanted}` };
+  }
+  const items = await driveQuery(dir.q);
+  const folders = items.filter((f) => f.mimeType === FOLDER_MIME && f.name !== SHARE_FOLDER_NAME).map(({ id, name }) => ({ id, name }));
+  const files = items.filter((f) => f.mimeType !== FOLDER_MIME).map(({ id, name, mimeType }) => ({ id, name, mimeType }));
+  return { id: dir.id, name: dir.name, parent: dir.parent, folders, files };
+}
+/** Nombre y tipo de un archivo de tu Drive. */
+export async function driveFileInfo(id) {
+  return (await drive(`/drive/v3/files/${safeId(id)}?fields=id,name,mimeType&supportsAllDrives=true`)).json();
+}
+
 export const connected = () => Boolean(loadClient()?.client_id && tokens?.refresh_token);
 export const email = () => tokens?.email || null;
 /** Se puede compartir con otras personas: sesión de Google y Firebase configurado. */
